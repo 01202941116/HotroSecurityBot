@@ -1,90 +1,137 @@
+# -*- coding: utf-8 -*-
 import os
 import re
-from telegram.ext import Updater, MessageHandler, Filters
+import logging
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-# ====== CẤU HÌNH ======
-# Token bot Telegram – bạn có thể lấy từ biến môi trường trên Render
-TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
-# Nếu chạy thử local thì có thể gán trực tiếp token để test:
-if not TOKEN:
-    TOKEN = "8360017614:AAfAdMj06cY9PyGYpHcL9vL03CM8rLbo2I"
+# ====== Cấu hình ======
+# Lấy token từ biến môi trường TELEGRAM_TOKEN (khuyên dùng trên Render)
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 
-# Danh sách domain cho phép (whitelist)
-WHITELIST = [
+# Cho phép link các domain sau (whitelist)
+WHITELIST = {
     "youtube.com",
     "youtu.be",
-    "duyenmy.vn"
-]
+    "duyenmy.vn",
+    "yandex.com",
+}
 
-# Danh sách cần chặn (blacklist)
+# Từ khoá / mẫu cần chặn (blacklist)
 BLACKLIST_PATTERNS = [
-    r"t\.me",        # chặn link Telegram
-    r"@\w+",         # chặn @username
-    r"sex",
-    r"18\+",
-    r"\.com"         # chặn các domain .com lạ (ngoài whitelist)
+    r"t\.me\/?\w*",          # link kênh / group Telegram
+    r"@\w{3,}",              # @username mention
+    r"\bsex\b",
+    r"18\+",                 # 18+
+    r"xxx",                  # xxx
 ]
 
-# ====== CÁC HÀM HỖ TRỢ ======
+# ====== Logging ======
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+log = logging.getLogger("HotroSecurityBot")
 
-def has_whitelisted_domain(text: str) -> bool:
-    """Kiểm tra nếu tin nhắn có chứa domain cho phép"""
-    if not text:
+# ====== Helpers ======
+def is_admin(update: Update, context: CallbackContext) -> bool:
+    """Kiểm tra xem người gửi có phải admin không (admin được phép)."""
+    try:
+        chat = update.effective_chat
+        user = update.effective_user
+        if not chat or not user:
+            return False
+        member = context.bot.get_chat_member(chat.id, user.id)
+        return member.status in ("administrator", "creator")
+    except Exception:
         return False
-    text_l = text.lower()
-    return any(d in text_l for d in WHITELIST)
 
-def matches_blacklist(text: str) -> bool:
-    """Kiểm tra nếu tin nhắn khớp danh sách cần chặn"""
-    if not text:
-        return False
-    text_l = text.lower()
-    return any(re.search(p, text_l) for p in BLACKLIST_PATTERNS)
-
-def get_message_text(update):
-    """Lấy text hoặc caption trong tin nhắn"""
-    msg = update.message
+def extract_text(update: Update) -> str:
+    """Lấy text hoặc caption từ message, đưa về lowercase."""
+    msg = update.effective_message
     if not msg:
         return ""
-    parts = []
-    if msg.text:
-        parts.append(msg.text)
-    if msg.caption:
-        parts.append(msg.caption)
-    return "\n".join(parts).strip()
+    raw = msg.text or msg.caption or ""
+    return raw.lower()
 
-# ====== XỬ LÝ CHÍNH ======
+def contains_whitelist(text: str) -> bool:
+    """Nếu text có chứa bất kỳ domain được whitelisted -> cho phép."""
+    for domain in WHITELIST:
+        if domain in text:
+            return True
+    return False
 
-def delete_spam(update, context):
+def looks_like_url(text: str) -> bool:
+    """Phát hiện có URL (để kết hợp với whitelist)."""
+    # Rất đơn giản & đủ dùng cho lọc cơ bản
+    return bool(re.search(r"(https?://|www\.)\S+", text))
+
+def match_blacklist(text: str) -> str:
+    """Trả về pattern nào match (nếu có), để log & xoá."""
+    for pattern in BLACKLIST_PATTERNS:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return pattern
+    return ""
+
+# ====== Handlers ======
+def start_cmd(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "🤖 Bot bảo vệ đã hoạt động.\n"
+        "• Tự động xoá quảng cáo, mention, link không cho phép.\n"
+        "• Whitelist: " + ", ".join(sorted(WHITELIST))
+    )
+
+def filter_message(update: Update, context: CallbackContext) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+
+    # Bỏ qua admin
+    if is_admin(update, context):
+        return
+
+    text = extract_text(update)
+    if not text:
+        return
+
+    # 1) Nếu là URL nhưng KHÔNG thuộc whitelist -> xoá
+    if looks_like_url(text) and not contains_whitelist(text):
+        _delete(update, context, reason="URL không thuộc whitelist")
+        return
+
+    # 2) Nếu dính blacklist pattern -> xoá
+    hit = match_blacklist(text)
+    if hit:
+        _delete(update, context, reason=f"Khớp blacklist: {hit}")
+        return
+
+def _delete(update: Update, context: CallbackContext, reason: str) -> None:
+    msg = update.effective_message
+    chat_id = msg.chat_id
+    msg_id = msg.message_id
     try:
-        msg = update.message
-        if not msg:
-            return
-        text = get_message_text(update)
-        if has_whitelisted_domain(text):
-            return
-        if matches_blacklist(text):
-            context.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id)
-            print(f"🗑 Đã xóa tin nhắn vi phạm: {text[:120]}")
+        context.bot.delete_message(chat_id, msg_id)
+        log.info("🗑 Xoá tin nhắn %s (chat=%s, msg_id=%s): %s", reason, chat_id, msg_id, (msg.text or msg.caption or "").strip())
     except Exception as e:
-        print(f"Lỗi khi xóa tin nhắn: {e}")
+        log.warning("Không xoá được tin nhắn: %s", e)
 
-def main():
+# ====== Main ======
+def main() -> None:
     if not TOKEN:
-        raise RuntimeError(
-            "⚠️ Thiếu TELEGRAM_TOKEN. Hãy vào Render → Environment → Add Variable: "
-            "Key=TELEGRAM_TOKEN, Value=<token của BotFather>"
-        )
+        log.error("Thiếu TELEGRAM_TOKEN. Hãy set Environment Variable TELEGRAM_TOKEN trên Render.")
+        return
 
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    # Gắn bộ lọc text, caption, media
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, delete_spam))
-    dp.add_handler(MessageHandler(Filters.caption, delete_spam))
-    dp.add_handler(MessageHandler(Filters.photo | Filters.video | Filters.document | Filters.animation, delete_spam))
+    dp.add_handler(CommandHandler("start", start_cmd))
+    # Lọc mọi tin nhắn text, caption (ảnh/video kèm caption)
+    dp.add_handler(MessageHandler(
+        Filters.text | Filters.caption,  # PTB 13.15 không có Filters.caption riêng, dùng như thế này
+        filter_message
+    ))
 
-    print("🤖 Bot đang chạy…")
+    log.info("🤖 Bot đang chạy…")
     updater.start_polling()
     updater.idle()
 
