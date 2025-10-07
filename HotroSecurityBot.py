@@ -8,7 +8,7 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, Comm
 # ====== TOKEN BOT ======
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not TOKEN:
-    TOKEN = "8360017614:AAfAdMj06cY9PyGYpHcL9vL03CM8rLbo2I"  # <-- thay token của bạn nếu cần
+    TOKEN = "8360017614:AAfAdMj06cY9PyGYpHcL9vL03CM8rLbo2I"  # thay bằng token của bạn nếu cần
 
 # ====== DANH SÁCH ======
 WHITELIST = ["youtube.com", "duyenmy.vn", "youtu.be"]
@@ -27,7 +27,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("HotroSecurityBot")
 
-# ====== HÀM HỖ TRỢ ======
+# ====== HÀM XỬ LÝ ======
 def extract_text(update: Update) -> str:
     msg = update.effective_message
     if not msg:
@@ -37,7 +37,6 @@ def extract_text(update: Update) -> str:
 def match_blacklist(text: str) -> bool:
     return any(re.search(p, text) for p in BLACKLIST_PATTERNS)
 
-# ====== XỬ LÝ TIN NHẮN ======
 def start(update: Update, context: CallbackContext):
     update.message.reply_text("🤖 Bot đang hoạt động và sẽ tự xóa tin nhắn vi phạm!")
 
@@ -48,7 +47,7 @@ def filter_message(update: Update, context: CallbackContext):
 
     text = extract_text(update)
 
-    # Bỏ qua nếu có link hợp lệ
+    # Cho phép link trong whitelist
     if any(domain in text for domain in WHITELIST):
         return
 
