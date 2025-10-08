@@ -1,7 +1,8 @@
-# HotroSecurityBot - Full version (Render + PTB 13.15)
-# Free: nolinks, noforwards, nobots, whitelist/blacklist
-# Pro (khóa): antiflood, noevents ... (/applykey)
-# Admin commands trả lời RIÊNG (DM). Nếu DM thất bại, nhắc ngắn trong nhóm.
+# HotroSecurityBot - Stable (Render + PTB 13.15)
+# - Admin-only private replies (fallback tự xóa trong nhóm nếu không DM được)
+# - Free features: nolinks, noforwards, nobots, whitelist/blacklist
+# - Pro features: antiflood, noevents  (kích hoạt bằng /applykey <key>)
+# - Mạng ổn định hơn: request timeouts + error handler
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
@@ -9,22 +10,24 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from flask import Flask
+
 from telegram import Update, ParseMode
-from telegram.error import TelegramError, Unauthorized
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
+from telegram.error import TimedOut, NetworkError, BadRequest, Unauthorized
 
 # ================== ENV ==================
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger("HotroSecurityBot")
+
 DB = "hotrosecurity.db"
 
 # ================== DB ==================
@@ -61,38 +64,6 @@ def is_admin(user_id: int) -> bool:
 def now_utc():
     return datetime.utcnow()
 
-def _send_dm(context: CallbackContext, user_id: int, text: str, **kwargs) -> bool:
-    """Gửi DM; True nếu ok, False nếu bị chặn/chưa /start."""
-    try:
-        context.bot.send_message(chat_id=user_id, text=text, **kwargs)
-        return True
-    except Unauthorized as e:
-        logger.warning("DM unauthorized/blocked to %s: %s", user_id, e)
-        return False
-    except TelegramError as e:
-        logger.warning("DM error to %s: %s", user_id, e)
-        return False
-
-def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
-    """
-    Trả lời RIÊNG cho người gọi lệnh; nếu không DM được, nhắn rất ngắn trong nhóm.
-    """
-    user = update.effective_user
-    chat = update.effective_chat
-    sent = False
-    if user and not user.is_bot:
-        sent = _send_dm(context, user.id, text, **kwargs)
-    if not sent and chat and chat.type in ("group", "supergroup"):
-        try:
-            context.bot.send_message(
-                chat_id=chat.id,
-                text="📩 Không thể gửi DM. Vui lòng mở chat riêng và bấm */start* với bot để nhận hướng dẫn.",
-                parse_mode=ParseMode.MARKDOWN,
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            logger.warning("fallback group notice failed: %s", e)
-
 def get_setting(chat_id: int):
     conn = _conn(); cur = conn.cursor()
     cur.execute("""SELECT nolinks, noforwards, nobots, antiflood, noevents, pro_until
@@ -126,7 +97,7 @@ def set_pro_until(chat_id: int, until_dt: datetime):
     cur.execute("UPDATE chat_settings SET pro_until=? WHERE chat_id=?", (until_dt.isoformat(), chat_id))
     conn.commit(); conn.close()
 
-# ===== whitelist / blacklist =====
+# -------- WL/BL --------
 def add_whitelist(chat_id, text):
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text))
@@ -157,7 +128,7 @@ def list_blacklist(chat_id):
     cur.execute("SELECT text FROM blacklist WHERE chat_id=?",(chat_id,))
     r=[x[0] for x in cur.fetchall()];conn.close();return r
 
-# ===== Pro keys =====
+# -------- Pro keys --------
 def gen_key(months=1):
     key = secrets.token_urlsafe(12)
     created = now_utc()
@@ -186,41 +157,75 @@ def consume_key(key: str, user_id: int):
     conn.commit();conn.close()
     return True,None,int(row[1])
 
-# ================== FILTERS ==================
+# ================== Messaging helpers ==================
+def _delete_later(bot, chat_id, message_id, seconds=5):
+    def worker():
+        time.sleep(seconds)
+        try:
+            bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
+
+def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
+    """
+    Gửi DM tới người gọi lệnh (thường là admin).
+    Nếu không DM được (Unauthorized | BadRequest) thì gửi trong nhóm rồi tự xóa sau vài giây.
+    """
+    user_id = update.effective_user.id
+    chat = update.effective_chat
+    try:
+        context.bot.send_message(chat_id=user_id, text=text, **kwargs)
+    except (Unauthorized, BadRequest) as e:
+        # Fallback thông báo tạm trong nhóm
+        if chat and chat.type in ("group", "supergroup"):
+            try:
+                m = context.bot.send_message(
+                    chat_id=chat.id,
+                    text="ℹ️ Mình không thể nhắn riêng cho bạn. Hãy mở DM với bot (ấn Start) rồi thử lại.",
+                    disable_web_page_preview=True
+                )
+                _delete_later(context.bot, chat.id, m.message_id, seconds=7)
+            except Exception:
+                pass
+        logger.warning("safe_reply_private fallback group: %s", e)
+    except Exception as e:
+        logger.warning("safe_reply_private other error: %s", e)
+
+# ================== FILTERS / STATE ==================
 URL_RE = re.compile(r"(https?://[^\s]+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{5,64})")
+
 FLOOD_WINDOW, FLOOD_LIMIT = 20, 3
 user_buckets = {}
 
-def _is_flood(chat_id,user_id):
+def _is_flood(chat_id, user_id):
     k=(chat_id,user_id);dq=user_buckets.get(k);now=time.time()
-    if dq is None: dq=deque(maxlen=FLOOD_LIMIT);user_buckets[k]=dq
-    while dq and now-dq[0]>FLOOD_WINDOW: dq.popleft()
-    dq.append(now);return len(dq)>FLOOD_LIMIT
+    if dq is None:
+        dq=deque(maxlen=FLOOD_LIMIT);user_buckets[k]=dq
+    while dq and now-dq[0]>FLOOD_WINDOW:
+        dq.popleft()
+    dq.append(now)
+    return len(dq)>FLOOD_LIMIT
 
 # ================== COMMANDS ==================
 def start(update,context):
-    safe_reply_private(
-        update,context,
-        "🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.",
-        disable_web_page_preview=True
-    )
+    safe_reply_private(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
 
 def _help_text_free():
     return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
 
-📌 *Lệnh quản lý nhóm*
 /status – Xem cấu hình & thời hạn Pro
-/nolinks on|off – Bật/tắt chặn link & @mention
-/noforwards on|off – Chặn tin forward
+/nolinks on|off – Chặn link & @mention
+/noforwards on|off – Chặn tin nhắn forward
 /nobots on|off – Cấm mời bot vào nhóm
 
-📜 *Danh sách kiểm soát*
+📜 Danh sách:
 /whitelist_add <text> /whitelist_remove <text>
 /blacklist_add <text> /blacklist_remove <text>
 /whitelist_list /blacklist_list
 
-🔑 *Nâng cấp*
+🔑 Nâng cấp:
 /applykey <key> – Kích hoạt gói Pro
 /genkey <tháng> – (Admin) tạo key dùng thử
 """.strip()
@@ -228,23 +233,25 @@ def _help_text_free():
 def _help_text_pro():
     return """💎 *HOTRO SECURITY PRO – ĐÃ KÍCH HOẠT*
 
-⚙️ *Lệnh cơ bản*
-/status – Xem cấu hình nhóm
-/nolinks on|off – Chặn link & mentions
-/noforwards on|off – Chặn tin forward
-/nobots on|off – Cấm bot vào nhóm
-/noevents on|off – Ẩn join/leave message
-/antiflood on|off – Chống spam (3 tin / 20s)
+Cơ bản:
+- /status
+- /nolinks on|off
+- /noforwards on|off
+- /nobots on|off
 
-📜 *Quản lý danh sách*
-/whitelist_add <text> /whitelist_remove <text>
-/blacklist_add <text> /blacklist_remove <text>
-/whitelist_list /blacklist_list
+Pro:
+- /antiflood on|off – Chống spam (3 tin/20s)
+- /noevents on|off – Ẩn join/left
 
-🔑 *Quản lý key*
-/applykey <key> – Gia hạn / kích hoạt Pro
-/genkey <tháng> – (Admin) tạo key mới
-/keys_list – (Admin) xem danh sách key
+Danh sách:
+- /whitelist_add <text> /whitelist_remove <text>
+- /blacklist_add <text> /blacklist_remove <text>
+- /whitelist_list /blacklist_list
+
+Key:
+- /applykey <key> – Gia hạn/kích hoạt
+- /genkey <tháng> – (Admin) tạo key
+- /keys_list – (Admin) xem key
 """.strip()
 
 def help_cmd(update,context):
@@ -262,8 +269,8 @@ def status(update,context):
     txt=(f"📋 Cấu hình:\n"
          f"nolinks={s['nolinks']} | noforwards={s['noforwards']} | nobots={s['nobots']} | "
          f"antiflood={s['antiflood']} | noevents={s['noevents']}\n{pro_txt}\n"
-         f"Whitelist: {', '.join(wl) if wl else '(none)'}\n"
-         f"Blacklist: {', '.join(bl) if bl else '(none)'}")
+         f"Whitelist: {', '.join(wl) if wl else '(trống)'}\n"
+         f"Blacklist: {', '.join(bl) if bl else '(trống)'}")
     safe_reply_private(update,context,txt)
 
 # ================== TOGGLES ==================
@@ -284,7 +291,7 @@ def nobots(u,c): _toggle(u,c,"nobots")
 def antiflood(u,c): _toggle(u,c,"antiflood",pro=True)
 def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 
-# ================== WL/BL CMDS ==================
+# ================== LIST CMDS ==================
 def whitelist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
         safe_reply_private(update,context,"❌ Bạn không phải admin."); return
@@ -332,11 +339,13 @@ def genkey_cmd(update,context):
     months = 1
     if context.args:
         try: months = int(context.args[0])
-        except:
+        except: 
             safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
     k, exp = gen_key(months)
-    safe_reply_private(update,context,f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tự hết hạn vào {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
-                       parse_mode=ParseMode.MARKDOWN)
+    safe_reply_private(update,context,
+        f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 def keys_list_cmd(update,context):
     if not is_admin(update.effective_user.id):
@@ -361,7 +370,7 @@ def applykey_cmd(update,context):
     new=base+timedelta(days=30*months); set_pro_until(update.effective_chat.id,new)
     safe_reply_private(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
 
-# ================== MESSAGE HANDLER ==================
+# ================== EVENTS & MODERATION ==================
 def message_handler(update,context):
     msg=update.message
     if not msg: return
@@ -373,7 +382,7 @@ def message_handler(update,context):
     # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
         try: msg.delete()
-        except: pass
+        except Exception: pass
         return
 
     # Link & mention filter (Free)
@@ -381,19 +390,19 @@ def message_handler(update,context):
     if s["nolinks"]:
         if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
             try: msg.delete()
-            except: pass
+            except Exception: pass
             return
         if mentions:
             for m in mentions:
                 if not any(w.lower() in m.lower() for w in wl):
                     try: msg.delete()
-                    except: pass
+                    except Exception: pass
                     return
 
     # Forwards (Free)
     if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
         try: msg.delete()
-        except: pass
+        except Exception: pass
         return
 
     # Anti-flood (Pro)
@@ -402,8 +411,41 @@ def message_handler(update,context):
             return
         if _is_flood(chat_id,user_id):
             try: msg.delete()
-            except: pass
+            except Exception: pass
             return
+
+def delete_service_messages(update: Update, context: CallbackContext):
+    # Ẩn các service message khi noevents=on
+    if get_setting(update.effective_chat.id)["noevents"]:
+        try:
+            update.effective_message.delete()
+        except Exception:
+            pass
+
+def on_new_members(update: Update, context: CallbackContext):
+    s = get_setting(update.effective_chat.id)
+    if s["noevents"]:
+        try: update.effective_message.delete()
+        except Exception: pass
+    if s["nobots"]:
+        for m in update.effective_message.new_chat_members:
+            if m.is_bot:
+                try:
+                    context.bot.kick_chat_member(update.effective_chat.id, m.id)
+                except Exception as e:
+                    logger.warning("Kick bot fail: %s", e)
+
+# ================== ERROR HANDLER ==================
+def error_handler(update, context):
+    err = context.error
+    if isinstance(err, TimedOut):
+        logger.warning("TimedOut từ Telegram, bỏ qua.")
+        return
+    if isinstance(err, NetworkError):
+        logger.warning("NetworkError tạm thời, ngủ 1s rồi bỏ qua.")
+        time.sleep(1)
+        return
+    logger.exception("Unhandled error: %s", err)
 
 # ================== BOOT ==================
 def start_bot():
@@ -411,16 +453,13 @@ def start_bot():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN missing"); return
 
-    updater=Updater(BOT_TOKEN,use_context=True)
-
-    # Xóa webhook + drop pending updates để tránh "Conflict: terminated by other getUpdates request"
-    try:
-        updater.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Webhook deleted (if any).")
-    except Exception as e:
-        logger.warning("delete_webhook failed: %s", e)
-
-    dp=updater.dispatcher
+    # Tăng độ chịu mạng chậm
+    updater = Updater(
+        BOT_TOKEN,
+        use_context=True,
+        request_kwargs={"read_timeout": 30, "connect_timeout": 30}
+    )
+    dp = updater.dispatcher
 
     # core
     dp.add_handler(CommandHandler("start",start))
@@ -447,24 +486,32 @@ def start_bot():
     dp.add_handler(CommandHandler("keys_list",keys_list_cmd))
     dp.add_handler(CommandHandler("applykey",applykey_cmd,pass_args=True))
 
+    # events
+    dp.add_handler(MessageHandler(Filters.status_update, delete_service_messages))
+    dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, on_new_members))
+
     # messages
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
 
-    logger.info("🚀 Bot started (Polling).")
-    updater.start_polling(drop_pending_updates=True)
+    dp.add_error_handler(error_handler)
+
+    logger.info("🚀 Starting polling… (drop_pending_updates=True)")
+    updater.start_polling(drop_pending_updates=True, timeout=20, read_latency=2)
     updater.idle()
 
 # ================== FLASK (Render keep-alive) ==================
-flask_app=Flask(__name__)
+flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
-    return "✅ HotroSecurityBot running (Render)"
+    return "✅ HotroSecurityBot is running (Render Free)."
 
 def run_flask():
-    port=int(os.environ.get("PORT",10000))
-    flask_app.run(host="0.0.0.0",port=port)
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
 
-if __name__=="__main__":
-    t=threading.Thread(target=start_bot,daemon=True)
+if __name__ == "__main__":
+    # Lưu ý: chỉ chạy 1 instance cho mỗi TOKEN, nếu không sẽ lỗi Conflict.
+    t = threading.Thread(target=start_bot, daemon=True)
     t.start()
     run_flask()
