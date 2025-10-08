@@ -1,14 +1,17 @@
-# HotroSecurityBot - starter main (clean indentation)
+# HotroSecurityBot - starter main (Render compatible)
 import logging
 import os
 import re
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+from flask import Flask
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
+# ================== LOAD ENVIRONMENT ==================
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 DB = "hotrosecurity.db"
 
+# ================== DATABASE INIT ==================
 def init_db():
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
@@ -44,6 +48,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ================== CORE FUNCTIONS ==================
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
@@ -111,13 +116,15 @@ def list_keys():
     conn.close()
     return rows
 
+# ================== FILTER PATTERNS ==================
 URL_RE = re.compile(r"(https?://[^\s]+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{5,64})")
 
+# ================== COMMANDS ==================
 def start(update: Update, context: CallbackContext):
     update.message.reply_text(
-        "HotroSecurityBot - moderation starter. Use /status to see config. "
-        "Admins: /genkey <months>, /whitelist_add, /blacklist_add, /keys_list."
+        "🤖 HotroSecurityBot đang hoạt động!\n"
+        "Dùng /status để xem cấu hình hoặc /help để biết thêm lệnh."
     )
 
 def status(update: Update, context: CallbackContext):
@@ -125,7 +132,7 @@ def status(update: Update, context: CallbackContext):
     s = get_setting(chat.id)
     wl = list_whitelist(chat.id)
     bl = list_blacklist(chat.id)
-    text = (f"Settings for chat {chat.title or chat.id}:\n"
+    text = (f"📋 Cấu hình nhóm {chat.title or chat.id}:\n"
             f"nolinks={s['nolinks']}, noforwards={s['noforwards']}, "
             f"nobots={s['nobots']}, antiflood={s['antiflood']}\n"
             f"Whitelist: {', '.join(wl) if wl else '(none)'}\n"
@@ -134,39 +141,39 @@ def status(update: Update, context: CallbackContext):
 
 def whitelist_add(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     if not context.args:
         update.message.reply_text("Usage: /whitelist_add domain_or_text"); return
     add_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("Added to whitelist.")
+    update.message.reply_text("✅ Đã thêm vào whitelist.")
 
 def whitelist_remove(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     if not context.args:
         update.message.reply_text("Usage: /whitelist_remove domain_or_text"); return
     remove_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("Removed from whitelist.")
+    update.message.reply_text("✅ Đã xóa khỏi whitelist.")
 
 def blacklist_add(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     if not context.args:
         update.message.reply_text("Usage: /blacklist_add domain_or_text"); return
     add_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("Added to blacklist.")
+    update.message.reply_text("✅ Đã thêm vào blacklist.")
 
 def blacklist_remove(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     if not context.args:
         update.message.reply_text("Usage: /blacklist_remove domain_or_text"); return
     remove_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("Removed from blacklist.")
+    update.message.reply_text("✅ Đã xóa khỏi blacklist.")
 
 def genkey_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     months = 1
     if context.args:
         try:
@@ -175,34 +182,22 @@ def genkey_cmd(update: Update, context: CallbackContext):
             update.message.reply_text("Usage: /genkey <months>"); return
     key, expires = gen_key(months)
     update.message.reply_text(
-        f"Generated key: `{key}` valid {months} month(s) until {expires.isoformat()} (UTC)",
+        f"🔑 Key mới: `{key}`\nHiệu lực {months} tháng, hết hạn {expires.isoformat()} (UTC)",
         parse_mode=ParseMode.MARKDOWN
     )
 
 def keys_list_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("You are not admin."); return
+        update.message.reply_text("❌ Bạn không phải admin."); return
     rows = list_keys()
     if not rows:
-        update.message.reply_text("No keys yet."); return
-    text = "Keys:\n" + "\n".join(
-        f"{r[0]} | months={r[1]} | created={r[2]} | expires={r[3]} | used_by={r[4]}" for r in rows
+        update.message.reply_text("Chưa có key nào."); return
+    text = "🗝 Danh sách key:\n" + "\n".join(
+        f"{r[0]} | {r[1]} tháng | tạo: {r[2]} | hết hạn: {r[3]} | dùng bởi: {r[4]}" for r in rows
     )
     update.message.reply_text(text)
 
-def apply_pro_key(chat_id, user_id, key):
-    conn = sqlite3.connect(DB); cur = conn.cursor()
-    cur.execute("SELECT key, months, created_at, expires_at FROM pro_keys WHERE key=?", (key,))
-    row = cur.fetchone()
-    if not row:
-        conn.close(); return False, "invalid key"
-    expires = datetime.fromisoformat(row[3])
-    if expires < datetime.utcnow():
-        conn.close(); return False, "expired"
-    cur.execute("UPDATE pro_keys SET used_by=? WHERE key=?", (user_id, key))
-    conn.commit(); conn.close()
-    return True, "ok"
-
+# ================== MESSAGE HANDLER ==================
 def message_handler(update: Update, context: CallbackContext):
     msg = update.message
     if not msg:
@@ -214,7 +209,7 @@ def message_handler(update: Update, context: CallbackContext):
     wl = list_whitelist(chat_id)
     bl = list_blacklist(chat_id)
 
-    # Blacklist (ưu tiên)
+    # Blacklist
     if any(b.lower() in text.lower() for b in bl):
         try: msg.delete()
         except Exception as e: logger.warning("delete failed: %s", e)
@@ -231,7 +226,7 @@ def message_handler(update: Update, context: CallbackContext):
             except Exception as e: logger.warning("delete failed: %s", e)
             return
 
-    # Mention filter (Pro có thể siết thêm, ở đây xóa nếu không nằm trong whitelist)
+    # Mention filter
     if s["nolinks"] and mentions:
         for m in mentions:
             if any(w.lower() in m.lower() for w in wl):
@@ -243,7 +238,8 @@ def message_handler(update: Update, context: CallbackContext):
 def error_handler(update, context):
     logger.exception("Exception: %s", context.error)
 
-def main():
+# ================== START TELEGRAM BOT ==================
+def start_bot():
     init_db()
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set"); return
@@ -259,9 +255,23 @@ def main():
     dp.add_handler(CommandHandler("keys_list", keys_list_cmd))
     dp.add_handler(MessageHandler(Filters.text | Filters.entity("url") | Filters.caption, message_handler))
     dp.add_error_handler(error_handler)
-    logger.info("Starting polling...")
+    logger.info("🚀 Starting polling...")
     updater.start_polling()
     updater.idle()
 
+# ================== FLASK PORT KEEP-ALIVE (Render Free) ==================
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "✅ HotroSecurityBot đang chạy trên Render Free!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
+
+# ================== RUN BOTH THREADS ==================
 if __name__ == "__main__":
-    main()
+    t = threading.Thread(target=run_flask)
+    t.start()
+    start_bot()
