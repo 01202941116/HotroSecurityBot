@@ -1,5 +1,5 @@
 # HotroSecurityBot - Fixed Full Version (Render + PTB 13.15)
-# Free features active by default, Pro locked properly, private admin replies
+# Free features active by default, Pro locked properly, private admin replies (with safe fallback)
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode
+from telegram.error import Forbidden, BadRequest
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
@@ -54,13 +55,56 @@ def init_db():
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-def now_utc(): 
+def now_utc():
     return datetime.utcnow()
 
 def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
-    """Gửi trả lời riêng cho người gọi lệnh (thường là admin)."""
+    """
+    Gửi DM cho người gọi lệnh (admin). Nếu không gửi được (chưa /start bot, hoặc là bot),
+    sẽ fallback nhắn ngay trong nhóm để người đó biết cần mở DM và bấm Start.
+    """
+    user = update.effective_user
+    chat = update.effective_chat
+    msg = update.effective_message
+
+    # Không cố DM tới bot (Telegram cấm bot nhắn bot)
+    if getattr(user, "is_bot", False):
+        try:
+            if msg:
+                msg.reply_text(
+                    "⚠️ Không thể gửi tin nhắn riêng cho tài khoản bot.",
+                    disable_web_page_preview=True
+                )
+        except Exception:
+            pass
+        return
+
     try:
-        context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
+        context.bot.send_message(chat_id=user.id, text=text, **kwargs)
+    except Forbidden as e:
+        # Thường do user chưa /start bot -> thông báo công khai trong nhóm
+        try:
+            if msg:
+                msg.reply_text(
+                    f"{text}\n\nℹ️ *Lưu ý:* Vui lòng mở chat riêng với bot và bấm /start để nhận tin nhắn riêng lần sau.",
+                    parse_mode=kwargs.get("parse_mode", None),
+                    disable_web_page_preview=True
+                )
+            else:
+                context.bot.send_message(chat_id=chat.id, text=f"📩 {text}")
+        except Exception:
+            pass
+        logger.warning("safe_reply_private Forbidden fallback: %s", e)
+    except BadRequest as e:
+        # Các lỗi khác (ví dụ message to be replied not found) -> gửi thẳng vào nhóm
+        try:
+            if msg:
+                msg.reply_text(text, **kwargs)
+            else:
+                context.bot.send_message(chat_id=chat.id, text=text, **kwargs)
+        except Exception:
+            pass
+        logger.warning("safe_reply_private BadRequest fallback: %s", e)
     except Exception as e:
         logger.warning("safe_reply_private error: %s", e)
 
@@ -229,7 +273,6 @@ def help_cmd(update,context):
     pro = is_pro(chat.id)
     text = _help_text_pro() if pro else _help_text_free()
 
-    # gửi DM + ping một dòng ngắn trong group cho admin biết
     if chat.type in ("group","supergroup"):
         safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
         safe_reply_private(update,context,"📩 Đã gửi hướng dẫn chi tiết qua tin nhắn riêng (DM).")
@@ -313,7 +356,7 @@ def genkey_cmd(update,context):
     months = 1
     if context.args:
         try: months = int(context.args[0])
-        except: 
+        except:
             safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
     k, exp = gen_key(months)
     safe_reply_private(update,context,f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
@@ -354,7 +397,7 @@ def message_handler(update,context):
     # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
         try: msg.delete()
-        except: pass
+        except Exception: pass
         return
 
     # Link & mention filter (Free)
@@ -362,28 +405,28 @@ def message_handler(update,context):
     if s["nolinks"]:
         if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
             try: msg.delete()
-            except: pass
+            except Exception: pass
             return
         if mentions:
             for m in mentions:
                 if not any(w.lower() in m.lower() for w in wl):
                     try: msg.delete()
-                    except: pass
+                    except Exception: pass
                     return
 
     # Forwards (Free)
     if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
         try: msg.delete()
-        except: pass
+        except Exception: pass
         return
 
     # Anti-flood (Pro)
     if s["antiflood"] and not is_admin(user_id):
-        if not is_pro(chat_id): 
+        if not is_pro(chat_id):
             return
         if _is_flood(chat_id,user_id):
             try: msg.delete()
-            except: pass
+            except Exception: pass
             return
 
 # ================== BOOT ==================
@@ -429,7 +472,7 @@ def start_bot():
 # ================== FLASK ==================
 flask_app=Flask(__name__)
 @flask_app.route("/")
-def home(): 
+def home():
     return "✅ HotroSecurityBot running (Render)"
 
 def run_flask():
