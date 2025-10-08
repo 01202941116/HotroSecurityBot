@@ -1,7 +1,7 @@
-# HotroSecurityBot - Fixed Full Version (Render + PTB 13.15)
-# - Free features active by default
-# - Pro locked properly
-# - Admin notifications: DM first, fallback to ephemeral in-group message (auto-delete)
+# HotroSecurityBot - Full version (Render + PTB 13.15)
+# - Free features: nolinks, noforwards, nobots, whitelist/blacklist (mặc định bật nolinks/noforwards/nobots)
+# - Pro (khóa): antiflood, noevents (ẩn join/leave), ... (mở bằng /applykey)
+# - Admin commands trả lời RIÊNG (DM). Nếu không thể DM (chưa /start hoặc chặn bot), bot sẽ thông báo rất ngắn trong nhóm.
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode
+from telegram.error import TelegramError, Forbidden
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
-from telegram.error import Unauthorized, TelegramError
 
 # ================== ENV ==================
 load_dotenv()
@@ -24,7 +24,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("HotroSecurityBot")
 DB = "hotrosecurity.db"
 
 # ================== DB ==================
@@ -61,33 +61,42 @@ def is_admin(user_id: int) -> bool:
 def now_utc():
     return datetime.utcnow()
 
-def notify_admin(update: Update, context: CallbackContext, text: str, ttl_sec: int = 8, **kwargs):
-    """
-    Cố gửi DM cho người gọi lệnh; nếu lỗi (Unauthorized/blocked/no-start),
-    gửi tin 'tạm' trong nhóm và tự xoá sau ttl_sec.
-    """
+def _send_dm(context: CallbackContext, user_id: int, text: str, **kwargs) -> bool:
+    """Gửi DM; trả True nếu thành công, False nếu bị chặn/chưa start."""
     try:
-        if update.effective_user and not update.effective_user.is_bot:
-            context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
-            return
-    except (Unauthorized, TelegramError) as e:
-        logger.info("DM failed (%s): %s", type(e).__name__, e)
-    except Exception as e:
-        logger.warning("DM unexpected fail: %s", e)
+        context.bot.send_message(chat_id=user_id, text=text, **kwargs)
+        return True
+    except Forbidden as e:
+        # bot bị chặn / hoặc user chưa chat với bot / hoặc user là bot
+        logger.warning("DM forbidden to %s: %s", user_id, e)
+        return False
+    except TelegramError as e:
+        logger.warning("DM error to %s: %s", user_id, e)
+        return False
 
-    # Fallback: gửi trong nhóm rồi tự xoá
-    try:
-        msg = update.effective_message.reply_text(
-            text + "\n_(Tin nhắn tạm, sẽ tự xoá)_",
-            parse_mode=kwargs.get("parse_mode"),
-            disable_web_page_preview=True
-        )
-        def _del():
-            try: context.bot.delete_message(update.effective_chat.id, msg.message_id)
-            except Exception: pass
-        threading.Timer(ttl_sec, _del).start()
-    except Exception as e2:
-        logger.warning("group fallback fail: %s", e2)
+def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
+    """
+    Gửi trả lời RIÊNG cho người gọi lệnh; nếu không DM được, nhắn ngắn gọn tại nhóm
+    để nhắc admin /start bot ở DM.
+    """
+    user = update.effective_user
+    chat = update.effective_chat
+
+    sent = False
+    if user and not user.is_bot:
+        sent = _send_dm(context, user.id, text, **kwargs)
+
+    if not sent and chat and chat.type in ("group", "supergroup"):
+        try:
+            # Thông báo rất ngắn, tránh lộ nội dung cấu hình cho toàn nhóm
+            context.bot.send_message(
+                chat_id=chat.id,
+                text="📩 Không thể gửi DM. Vui lòng mở chat riêng và bấm */start* với bot để nhận hướng dẫn.",
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.warning("fallback group notice failed: %s", e)
 
 def get_setting(chat_id: int):
     conn = _conn(); cur = conn.cursor()
@@ -160,7 +169,7 @@ def gen_key(months=1):
     expires = created + timedelta(days=30*int(months))
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO pro_keys(key,months,created_at,expires_at) VALUES(?,?,?,?)",
-        (key,months,created.isoformat(),expires.isoformat()))
+                (key,months,created.isoformat(),expires.isoformat()))
     conn.commit();conn.close()
     return key,expires
 
@@ -196,7 +205,12 @@ def _is_flood(chat_id,user_id):
 
 # ================== COMMANDS ==================
 def start(update,context):
-    notify_admin(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
+    # Cho phép /start ở DM hoặc nhóm – nhưng hướng dẫn chi tiết sẽ gửi qua DM
+    safe_reply_private(
+        update,context,
+        "🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.",
+        disable_web_page_preview=True
+    )
 
 def _help_text_free():
     return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
@@ -242,11 +256,11 @@ def _help_text_pro():
 def help_cmd(update,context):
     chat = update.effective_chat
     user_id = update.effective_user.id
+    # chỉ cho admin xem help (và gửi qua DM)
     if chat.type in ("group","supergroup") and not is_admin(user_id):
         return
-    pro = is_pro(chat.id)
-    text = _help_text_pro() if pro else _help_text_free()
-    notify_admin(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
+    text = _help_text_pro() if is_pro(chat.id) else _help_text_free()
+    safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
 
 def status(update,context):
     s=get_setting(update.effective_chat.id)
@@ -257,19 +271,19 @@ def status(update,context):
          f"antiflood={s['antiflood']} | noevents={s['noevents']}\n{pro_txt}\n"
          f"Whitelist: {', '.join(wl) if wl else '(none)'}\n"
          f"Blacklist: {', '.join(bl) if bl else '(none)'}")
-    notify_admin(update,context,txt)
+    safe_reply_private(update,context,txt)
 
 # ================== TOGGLES ==================
 def _toggle(update,context,field,pro=False):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin.");return
+        safe_reply_private(update,context,"❌ Bạn không phải admin.");return
     if pro and not is_pro(update.effective_chat.id):
-        notify_admin(update,context,f"🔒 {field} chỉ dành cho Pro.");return
+        safe_reply_private(update,context,f"🔒 {field} chỉ dành cho Pro.");return
     if not context.args or context.args[0].lower() not in ("on","off"):
-        notify_admin(update,context,f"Usage: /{field} on|off");return
+        safe_reply_private(update,context,f"Usage: /{field} on|off");return
     val=1 if context.args[0].lower()=="on" else 0
     set_setting(update.effective_chat.id,field,val)
-    notify_admin(update,context,f"✅ {field} = {'on' if val else 'off'}")
+    safe_reply_private(update,context,f"✅ {field} = {'on' if val else 'off'}")
 
 def nolinks(u,c): _toggle(u,c,"nolinks")
 def noforwards(u,c): _toggle(u,c,"noforwards")
@@ -280,82 +294,79 @@ def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 # ================== WHITELIST / BLACKLIST CMDS ==================
 def whitelist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        notify_admin(update,context,"Usage: /whitelist_add <text>"); return
+        safe_reply_private(update,context,"Usage: /whitelist_add <text>"); return
     add_whitelist(update.effective_chat.id, " ".join(context.args).strip())
-    notify_admin(update,context,"✅ Đã thêm vào whitelist.")
+    safe_reply_private(update,context,"✅ Đã thêm vào whitelist.")
 
 def whitelist_remove_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        notify_admin(update,context,"Usage: /whitelist_remove <text>"); return
+        safe_reply_private(update,context,"Usage: /whitelist_remove <text>"); return
     remove_whitelist(update.effective_chat.id, " ".join(context.args).strip())
-    notify_admin(update,context,"✅ Đã xoá khỏi whitelist.")
+    safe_reply_private(update,context,"✅ Đã xoá khỏi whitelist.")
 
 def whitelist_list_cmd(update,context):
     wl = list_whitelist(update.effective_chat.id)
-    notify_admin(update,context,"📄 Whitelist:\n" + ("\n".join(wl) if wl else "(trống)"))
+    safe_reply_private(update,context,"📄 Whitelist:\n" + ("\n".join(wl) if wl else "(trống)"))
 
 def blacklist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        notify_admin(update,context,"Usage: /blacklist_add <text>"); return
+        safe_reply_private(update,context,"Usage: /blacklist_add <text>"); return
     add_blacklist(update.effective_chat.id, " ".join(context.args).strip())
-    notify_admin(update,context,"✅ Đã thêm vào blacklist.")
+    safe_reply_private(update,context,"✅ Đã thêm vào blacklist.")
 
 def blacklist_remove_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        notify_admin(update,context,"Usage: /blacklist_remove <text>"); return
+        safe_reply_private(update,context,"Usage: /blacklist_remove <text>"); return
     remove_blacklist(update.effective_chat.id, " ".join(context.args).strip())
-    notify_admin(update,context,"✅ Đã xoá khỏi blacklist.")
+    safe_reply_private(update,context,"✅ Đã xoá khỏi blacklist.")
 
 def blacklist_list_cmd(update,context):
     bl = list_blacklist(update.effective_chat.id)
-    notify_admin(update,context,"📄 Blacklist:\n" + ("\n".join(bl) if bl else "(trống)"))
+    safe_reply_private(update,context,"📄 Blacklist:\n" + ("\n".join(bl) if bl else "(trống)"))
 
 # ================== KEY CMDS ==================
 def genkey_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     months = 1
     if context.args:
         try: months = int(context.args[0])
         except:
-            notify_admin(update,context,"Usage: /genkey <tháng>"); return
+            safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
     k, exp = gen_key(months)
-    notify_admin(
-        update,context,
-        f"🔑 Key: `{k}`\nHiệu lực {months} tháng (đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    safe_reply_private(update,context,f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tự hết hạn vào {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
+                       parse_mode=ParseMode.MARKDOWN)
 
 def keys_list_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        notify_admin(update,context,"❌ Bạn không phải admin."); return
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
     rows = list_keys()
     if not rows:
-        notify_admin(update,context,"(Chưa có key)"); return
+        safe_reply_private(update,context,"(Chưa có key)"); return
     out = ["🗝 Danh sách key:"]
     for k, m, c, e, u in rows:
         out.append(f"{k} | {m} tháng | tạo:{c} | hết hạn:{e} | used_by:{u}")
-    notify_admin(update,context,"\n".join(out))
+    safe_reply_private(update,context,"\n".join(out))
 
 def applykey_cmd(update,context):
     if not context.args:
-        notify_admin(update,context,"Usage: /applykey <key>");return
+        safe_reply_private(update,context,"Usage: /applykey <key>");return
     ok,reason,months=consume_key(context.args[0].strip(),update.effective_user.id)
     if not ok:
         m={"invalid":"❌ Key sai","used":"❌ Key đã dùng","expired":"❌ Key hết hạn"}[reason]
-        notify_admin(update,context,m);return
+        safe_reply_private(update,context,m);return
     s=get_setting(update.effective_chat.id)
     base=s["pro_until"] if s["pro_until"] and s["pro_until"]>now_utc() else now_utc()
     new=base+timedelta(days=30*months); set_pro_until(update.effective_chat.id,new)
-    notify_admin(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
+    safe_reply_private(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
 
 # ================== MESSAGE HANDLER ==================
 def message_handler(update,context):
@@ -406,7 +417,17 @@ def start_bot():
     init_db()
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN missing"); return
+
     updater=Updater(BOT_TOKEN,use_context=True)
+
+    # Quan trọng: xóa webhook (nếu từng chạy webhook) + bỏ pending updates để
+    # tránh lỗi "Conflict: terminated by other getUpdates request"
+    try:
+        updater.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook deleted (if any).")
+    except Exception as e:
+        logger.warning("delete_webhook failed: %s", e)
+
     dp=updater.dispatcher
 
     # core
@@ -437,11 +458,12 @@ def start_bot():
     # messages
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
 
-    logger.info("🚀 Bot started (Polling). Nếu gặp lỗi 'Conflict', hãy chắc chắn chỉ 1 instance dùng BOT_TOKEN này đang chạy.")
-    updater.start_polling()
+    logger.info("🚀 Bot started (Polling).")
+    # v13 hỗ trợ drop_pending_updates trong start_polling
+    updater.start_polling(drop_pending_updates=True)
     updater.idle()
 
-# ================== FLASK ==================
+# ================== FLASK (Render keep-alive) ==================
 flask_app=Flask(__name__)
 @flask_app.route("/")
 def home():
