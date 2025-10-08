@@ -533,57 +533,61 @@ def message_handler(update,context):
 def start_bot():
     init_db()
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN missing"); return
+        logger.error("BOT_TOKEN missing")
+        return
 
     updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-    # ✨ Thêm đoạn sau để chắc chắn không còn webhook & xoá backlog
+    # ✅ FIX: xóa webhook cũ trước khi polling để tránh lỗi Conflict
     try:
         updater.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook cleared successfully before polling.")
     except Exception as e:
-        logger.warning("delete_webhook failed: %s", e)
+        logger.warning(f"Failed to delete webhook: {e}")
 
     # core
-    dp.add_handler(CommandHandler("start",start))
-    dp.add_handler(CommandHandler("help",help_cmd))
-    dp.add_handler(CommandHandler("status",status))
-    dp.add_handler(CommandHandler("myid",myid_cmd))
-    dp.add_handler(CommandHandler("chatid",chatid_cmd))
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_cmd))
+    dp.add_handler(CommandHandler("status", status))
+    dp.add_handler(CommandHandler("myid", myid_cmd))
+    dp.add_handler(CommandHandler("chatid", chatid_cmd))
 
     # toggles
-    dp.add_handler(CommandHandler("nolinks",nolinks,pass_args=True))
-    dp.add_handler(CommandHandler("noforwards",noforwards,pass_args=True))
-    dp.add_handler(CommandHandler("nobots",nobots,pass_args=True))
-    dp.add_handler(CommandHandler("antiflood",antiflood,pass_args=True))
-    dp.add_handler(CommandHandler("noevents",noevents,pass_args=True))
+    dp.add_handler(CommandHandler("nolinks", nolinks, pass_args=True))
+    dp.add_handler(CommandHandler("noforwards", noforwards, pass_args=True))
+    dp.add_handler(CommandHandler("nobots", nobots, pass_args=True))
+    dp.add_handler(CommandHandler("antiflood", antiflood, pass_args=True))
+    dp.add_handler(CommandHandler("noevents", noevents, pass_args=True))
 
     # lists
-    dp.add_handler(CommandHandler("whitelist_add",whitelist_add_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("whitelist_remove",whitelist_remove_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("whitelist_list",whitelist_list_cmd))
-    dp.add_handler(CommandHandler("blacklist_add",blacklist_add_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("blacklist_remove",blacklist_remove_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("blacklist_list",blacklist_list_cmd))
+    dp.add_handler(CommandHandler("whitelist_add", whitelist_add_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("whitelist_remove", whitelist_remove_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("whitelist_list", whitelist_list_cmd))
+    dp.add_handler(CommandHandler("blacklist_add", blacklist_add_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("blacklist_remove", blacklist_remove_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("blacklist_list", blacklist_list_cmd))
 
     # key + trial
-    dp.add_handler(CommandHandler("genkey",genkey_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("keys_list",keys_list_cmd))
-    dp.add_handler(CommandHandler("applykey",applykey_cmd,pass_args=True))
-    dp.add_handler(CommandHandler("trial7",trial7_cmd))
+    dp.add_handler(CommandHandler("genkey", genkey_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("keys_list", keys_list_cmd))
+    dp.add_handler(CommandHandler("applykey", applykey_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("trial7", trial7_cmd))
 
     # messages
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
 
     # scheduler: check pro expiry each 30 minutes
     jobq: JobQueue = updater.job_queue
-    jobq.run_repeating(pro_expiry_check, interval=30*60, first=60)
+    jobq.run_repeating(pro_expiry_check, interval=30 * 60, first=60)
 
     logger.info("🚀 Bot polling...")
     try:
         updater.start_polling(drop_pending_updates=True, timeout=20)
     except Exception as e:
-        logger.error("start_polling error (possible concurrent instance): %s", e)
+        logger.error(f"start_polling error (possible concurrent instance): {e}")
         raise
+
     updater.idle()
 
 # ================== FLASK (Render keep-alive) ==================
