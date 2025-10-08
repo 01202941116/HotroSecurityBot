@@ -6,9 +6,9 @@ from collections import deque
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
-from telegram import Update, ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ParseMode
 from telegram.ext import (
-    Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+    Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
 
 # ================== ENV ==================
@@ -54,10 +54,11 @@ def init_db():
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-def now_utc(): return datetime.utcnow()
+def now_utc(): 
+    return datetime.utcnow()
 
 def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
-    """Trả lời riêng admin thay vì gửi ra nhóm"""
+    """Gửi trả lời riêng cho người gọi lệnh (thường là admin)."""
     try:
         context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
     except Exception as e:
@@ -96,7 +97,7 @@ def set_pro_until(chat_id: int, until_dt: datetime):
     cur.execute("UPDATE chat_settings SET pro_until=? WHERE chat_id=?", (until_dt.isoformat(), chat_id))
     conn.commit(); conn.close()
 
-# whitelist / blacklist
+# ===== whitelist / blacklist (DB ops) =====
 def add_whitelist(chat_id, text):
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text))
@@ -127,7 +128,7 @@ def list_blacklist(chat_id):
     cur.execute("SELECT text FROM blacklist WHERE chat_id=?",(chat_id,))
     r=[x[0] for x in cur.fetchall()];conn.close();return r
 
-# Pro keys
+# ===== Pro keys =====
 def gen_key(months=1):
     key = secrets.token_urlsafe(12)
     created = now_utc()
@@ -137,6 +138,12 @@ def gen_key(months=1):
                 (key,months,created.isoformat(),expires.isoformat()))
     conn.commit();conn.close()
     return key,expires
+
+def list_keys():
+    conn=_conn();cur=conn.cursor()
+    cur.execute("SELECT key,months,created_at,expires_at,used_by FROM pro_keys")
+    rows=cur.fetchall(); conn.close()
+    return rows
 
 def consume_key(key: str, user_id: int):
     conn=_conn();cur=conn.cursor()
@@ -166,34 +173,68 @@ def _is_flood(chat_id,user_id):
 def start(update,context):
     safe_reply_private(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
 
+def _help_text_free():
+    return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
+
+📌 *Lệnh quản lý nhóm*
+/status – Xem cấu hình & thời hạn Pro
+/nolinks on|off – Bật/tắt chặn link & @mention
+/noforwards on|off – Chặn tin forward
+/nobots on|off – Cấm mời bot vào nhóm
+
+📜 *Danh sách kiểm soát*
+/whitelist_add <text> /whitelist_remove <text>
+/blacklist_add <text> /blacklist_remove <text>
+/whitelist_list /blacklist_list
+
+🔑 *Nâng cấp*
+/applykey <key> – Kích hoạt gói Pro
+/genkey <tháng> – (Admin) tạo key dùng thử
+""".strip()
+
+def _help_text_pro():
+    return """💎 *HOTRO SECURITY PRO – ĐÃ KÍCH HOẠT*
+
+⚙️ *Lệnh cơ bản*
+/status – Xem cấu hình nhóm
+/nolinks on|off – Chặn link & mentions
+/noforwards on|off – Chặn tin forward
+/nobots on|off – Cấm bot vào nhóm
+/noevents on|off – Ẩn join/leave message
+/antiflood on|off – Chống spam (3 tin / 20s)
+
+📜 *Quản lý danh sách*
+/whitelist_add <text> /whitelist_remove <text>
+/blacklist_add <text> /blacklist_remove <text>
+/whitelist_list /blacklist_list
+
+📣 *Quảng cáo tự động (nếu bạn bổ sung sau này)*
+/ads_add <phút> <nội dung>
+/ads_list | /ads_pause <id> | /ads_resume <id> | /ads_delete <id>
+
+🔑 *Quản lý key*
+/applykey <key> – Gia hạn / kích hoạt Pro
+/genkey <tháng> – (Admin) tạo key mới
+/keys_list – (Admin) xem danh sách key
+""".strip()
+
 def help_cmd(update,context):
-    chat_id=update.effective_chat.id; pro=is_pro(chat_id)
-    lines=[
-        "🛡 *HƯỚNG DẪN SỬ DỤNG*",
-        "• `/status` – Xem cấu hình & thời hạn Pro",
-        "• `/nolinks on|off` – Bật/tắt chặn link & @mention",
-        "• `/noforwards on|off` – Chặn tin forward",
-        "• `/nobots on|off` – Cấm mời bot vào nhóm",
-        "",
-        "• `/whitelist_add <text>` / `/whitelist_remove <text>`",
-        "• `/blacklist_add <text>` / `/blacklist_remove <text>`",
-        ""
-    ]
-    if pro:
-        lines += [
-            "✨ *Tính năng Pro:*",
-            "• `/antiflood on|off` – Chống spam (3 tin / 20s)",
-            "• `/noevents on|off` – Ẩn join/leave",
-            "• `/ads_add`, `/ads_list`, `/ads_pause`, `/ads_resume`, `/ads_delete` – Tự động quảng cáo",
-            "• Siết mentions, ưu tiên blacklist"
-        ]
+    chat = update.effective_chat
+    user_id = update.effective_user.id
+
+    # chỉ cho admin xem help (và gửi qua DM)
+    if chat.type in ("group","supergroup") and not is_admin(user_id):
+        return
+
+    pro = is_pro(chat.id)
+    text = _help_text_pro() if pro else _help_text_free()
+
+    # gửi DM + ping một dòng ngắn trong group cho admin biết
+    if chat.type in ("group","supergroup"):
+        safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
+        safe_reply_private(update,context,"📩 Đã gửi hướng dẫn chi tiết qua tin nhắn riêng (DM).")
     else:
-        lines += [
-            "🔒 *Tính năng Pro (chưa kích hoạt)*",
-            "• `/applykey <key>` – Kích hoạt Pro",
-            "• `/genkey` (Admin) – Tạo key thử nghiệm"
-        ]
-    safe_reply_private(update,context,"\n".join(lines),parse_mode=ParseMode.MARKDOWN)
+        safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
 
 def status(update,context):
     s=get_setting(update.effective_chat.id)
@@ -224,7 +265,71 @@ def nobots(u,c): _toggle(u,c,"nobots")
 def antiflood(u,c): _toggle(u,c,"antiflood",pro=True)
 def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 
-# ================== APPLY KEY ==================
+# ================== WHITELIST / BLACKLIST CMDS ==================
+def whitelist_add_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply_private(update,context,"Usage: /whitelist_add <text>"); return
+    add_whitelist(update.effective_chat.id, " ".join(context.args).strip())
+    safe_reply_private(update,context,"✅ Đã thêm vào whitelist.")
+
+def whitelist_remove_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply_private(update,context,"Usage: /whitelist_remove <text>"); return
+    remove_whitelist(update.effective_chat.id, " ".join(context.args).strip())
+    safe_reply_private(update,context,"✅ Đã xoá khỏi whitelist.")
+
+def whitelist_list_cmd(update,context):
+    wl = list_whitelist(update.effective_chat.id)
+    safe_reply_private(update,context,"📄 Whitelist:\n" + ("\n".join(wl) if wl else "(trống)"))
+
+def blacklist_add_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply_private(update,context,"Usage: /blacklist_add <text>"); return
+    add_blacklist(update.effective_chat.id, " ".join(context.args).strip())
+    safe_reply_private(update,context,"✅ Đã thêm vào blacklist.")
+
+def blacklist_remove_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply_private(update,context,"Usage: /blacklist_remove <text>"); return
+    remove_blacklist(update.effective_chat.id, " ".join(context.args).strip())
+    safe_reply_private(update,context,"✅ Đã xoá khỏi blacklist.")
+
+def blacklist_list_cmd(update,context):
+    bl = list_blacklist(update.effective_chat.id)
+    safe_reply_private(update,context,"📄 Blacklist:\n" + ("\n".join(bl) if bl else "(trống)"))
+
+# ================== KEY CMDS ==================
+def genkey_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    months = 1
+    if context.args:
+        try: months = int(context.args[0])
+        except: 
+            safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
+    k, exp = gen_key(months)
+    safe_reply_private(update,context,f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
+                       parse_mode=ParseMode.MARKDOWN)
+
+def keys_list_cmd(update,context):
+    if not is_admin(update.effective_user.id):
+        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+    rows = list_keys()
+    if not rows:
+        safe_reply_private(update,context,"(Chưa có key)"); return
+    out = ["🗝 Danh sách key:"]
+    for k, m, c, e, u in rows:
+        out.append(f"{k} | {m} tháng | tạo:{c} | hết hạn:{e} | used_by:{u}")
+    safe_reply_private(update,context,"\n".join(out))
+
 def applykey_cmd(update,context):
     if not context.args:
         safe_reply_private(update,context,"Usage: /applykey <key>");return
@@ -246,13 +351,13 @@ def message_handler(update,context):
     wl=list_whitelist(chat_id); bl=list_blacklist(chat_id)
     txt=msg.text or msg.caption or ""
 
-    # blacklist ưu tiên
+    # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
         try: msg.delete()
         except: pass
         return
 
-    # nolinks (free)
+    # Link & mention filter (Free)
     urls=URL_RE.findall(txt); mentions=MENTION_RE.findall(txt)
     if s["nolinks"]:
         if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
@@ -266,15 +371,16 @@ def message_handler(update,context):
                     except: pass
                     return
 
-    # noforwards
-    if s["noforwards"] and (msg.forward_date or msg.forward_from):
+    # Forwards (Free)
+    if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
         try: msg.delete()
         except: pass
         return
 
-    # antiflood (pro)
+    # Anti-flood (Pro)
     if s["antiflood"] and not is_admin(user_id):
-        if not is_pro(chat_id): return
+        if not is_pro(chat_id): 
+            return
         if _is_flood(chat_id,user_id):
             try: msg.delete()
             except: pass
@@ -287,16 +393,35 @@ def start_bot():
         logger.error("BOT_TOKEN missing"); return
     updater=Updater(BOT_TOKEN,use_context=True)
     dp=updater.dispatcher
+
+    # core
     dp.add_handler(CommandHandler("start",start))
     dp.add_handler(CommandHandler("help",help_cmd))
     dp.add_handler(CommandHandler("status",status))
+
+    # toggles
     dp.add_handler(CommandHandler("nolinks",nolinks,pass_args=True))
     dp.add_handler(CommandHandler("noforwards",noforwards,pass_args=True))
     dp.add_handler(CommandHandler("nobots",nobots,pass_args=True))
     dp.add_handler(CommandHandler("antiflood",antiflood,pass_args=True))
     dp.add_handler(CommandHandler("noevents",noevents,pass_args=True))
+
+    # lists
+    dp.add_handler(CommandHandler("whitelist_add",whitelist_add_cmd,pass_args=True))
+    dp.add_handler(CommandHandler("whitelist_remove",whitelist_remove_cmd,pass_args=True))
+    dp.add_handler(CommandHandler("whitelist_list",whitelist_list_cmd))
+    dp.add_handler(CommandHandler("blacklist_add",blacklist_add_cmd,pass_args=True))
+    dp.add_handler(CommandHandler("blacklist_remove",blacklist_remove_cmd,pass_args=True))
+    dp.add_handler(CommandHandler("blacklist_list",blacklist_list_cmd))
+
+    # keys
+    dp.add_handler(CommandHandler("genkey",genkey_cmd,pass_args=True))
+    dp.add_handler(CommandHandler("keys_list",keys_list_cmd))
     dp.add_handler(CommandHandler("applykey",applykey_cmd,pass_args=True))
+
+    # messages
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
+
     logger.info("🚀 Bot started")
     updater.start_polling()
     updater.idle()
@@ -304,7 +429,9 @@ def start_bot():
 # ================== FLASK ==================
 flask_app=Flask(__name__)
 @flask_app.route("/")
-def home(): return "✅ HotroSecurityBot running (Render)"
+def home(): 
+    return "✅ HotroSecurityBot running (Render)"
+
 def run_flask():
     port=int(os.environ.get("PORT",10000))
     flask_app.run(host="0.0.0.0",port=port)
