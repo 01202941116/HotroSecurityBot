@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode
-from telegram.error import Forbidden, BadRequest
+from telegram.error import BadRequest, Unauthorized, TelegramError
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
@@ -60,43 +60,40 @@ def now_utc():
 
 def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
     """
-    Gửi DM cho người gọi lệnh (admin). Nếu không gửi được (chưa /start bot, hoặc là bot),
-    sẽ fallback nhắn ngay trong nhóm để người đó biết cần mở DM và bấm Start.
+    Gửi DM cho người gọi lệnh (admin). Nếu không gửi được (user chưa /start bot,
+    hoặc đó là tài khoản bot) thì fallback trả lời ngay trong nhóm.
     """
     user = update.effective_user
     chat = update.effective_chat
     msg = update.effective_message
 
-    # Không cố DM tới bot (Telegram cấm bot nhắn bot)
+    # Không DM tới bot
     if getattr(user, "is_bot", False):
         try:
             if msg:
-                msg.reply_text(
-                    "⚠️ Không thể gửi tin nhắn riêng cho tài khoản bot.",
-                    disable_web_page_preview=True
-                )
+                msg.reply_text("⚠️ Không thể gửi tin nhắn riêng cho tài khoản bot.",
+                               disable_web_page_preview=True)
         except Exception:
             pass
         return
 
     try:
         context.bot.send_message(chat_id=user.id, text=text, **kwargs)
-    except Forbidden as e:
-        # Thường do user chưa /start bot -> thông báo công khai trong nhóm
+    except Unauthorized as e:
+        # User chưa /start bot -> thông báo công khai
         try:
             if msg:
                 msg.reply_text(
-                    f"{text}\n\nℹ️ *Lưu ý:* Vui lòng mở chat riêng với bot và bấm /start để nhận tin nhắn riêng lần sau.",
-                    parse_mode=kwargs.get("parse_mode", None),
-                    disable_web_page_preview=True
+                    f"{text}\n\nℹ️ *Lưu ý:* Hãy mở chat riêng với bot và bấm /start để nhận DM lần sau.",
+                    parse_mode=kwargs.get("parse_mode"),
+                    disable_web_page_preview=True,
                 )
             else:
                 context.bot.send_message(chat_id=chat.id, text=f"📩 {text}")
         except Exception:
             pass
-        logger.warning("safe_reply_private Forbidden fallback: %s", e)
+        logger.warning("safe_reply_private Unauthorized fallback: %s", e)
     except BadRequest as e:
-        # Các lỗi khác (ví dụ message to be replied not found) -> gửi thẳng vào nhóm
         try:
             if msg:
                 msg.reply_text(text, **kwargs)
@@ -105,6 +102,16 @@ def safe_reply_private(update: Update, context: CallbackContext, text: str, **kw
         except Exception:
             pass
         logger.warning("safe_reply_private BadRequest fallback: %s", e)
+    except TelegramError as e:
+        # Bắt mọi lỗi Telegram khác và fallback
+        try:
+            if msg:
+                msg.reply_text(text, **kwargs)
+            else:
+                context.bot.send_message(chat_id=chat.id, text=text, **kwargs)
+        except Exception:
+            pass
+        logger.warning("safe_reply_private TelegramError fallback: %s", e)
     except Exception as e:
         logger.warning("safe_reply_private error: %s", e)
 
@@ -179,7 +186,7 @@ def gen_key(months=1):
     expires = created + timedelta(days=30*int(months))
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO pro_keys(key,months,created_at,expires_at) VALUES(?,?,?,?)",
-                (key,months,created.isoformat(),expires.isoformat()))
+        (key,months,created.isoformat(),expires.isoformat()))
     conn.commit();conn.close()
     return key,expires
 
@@ -359,8 +366,9 @@ def genkey_cmd(update,context):
         except:
             safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
     k, exp = gen_key(months)
-    safe_reply_private(update,context,f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
-                       parse_mode=ParseMode.MARKDOWN)
+    safe_reply_private(update,context,
+        f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
+        parse_mode=ParseMode.MARKDOWN)
 
 def keys_list_cmd(update,context):
     if not is_admin(update.effective_user.id):
