@@ -229,45 +229,90 @@ def chatid_cmd(update: Update, context: CallbackContext):
 def _help_text_free():
     return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
 
+ℹ️ *Lưu ý:* Gõ `/help` trong group chỉ admin mới nhận hướng dẫn chi tiết qua DM.
+
+🚀 *Bắt đầu*
+• Thêm bot vào nhóm → cấp quyền xoá tin nhắn.
+• Mở DM với bot và gửi `/start` để nhận thông báo riêng (DM).
+
 📌 *Quản lý nhóm*
-/status – Xem cấu hình & thời hạn Pro
-/nolinks on|off – Chặn link & @mention
-/noforwards on|off – Chặn tin forward
-/nobots on|off – Cấm mời bot vào nhóm
+• `/status`
+  → Xem cấu hình hiện tại, hạn Pro, whitelist/blacklist của nhóm.
 
-📜 *Danh sách*
-/whitelist_add <text> /whitelist_remove <text>
-/blacklist_add <text> /blacklist_remove <text>
-/whitelist_list /blacklist_list
+• `/nolinks on|off`
+  → Bật/tắt *chặn link & @mention*.
+  Ví dụ: `/nolinks on`
+  ✅ Muốn *cho phép một link/mention cụ thể* thì thêm vào whitelist (xem mục “Danh sách”).
 
-🧪 *Dùng thử Pro 7 ngày (admin)* 
-/trial7 – Kích hoạt dùng thử cho *nhóm hiện tại*
+• `/noforwards on|off`
+  → Chặn tin nhắn được *forward* vào nhóm.
+  Ví dụ: `/noforwards on`
 
-🔑 *Nâng cấp vĩnh viễn*
-/applykey <key> – Kích hoạt Pro
-/genkey <tháng> – (Admin) tạo key dùng thử
+• `/nobots on|off`
+  → Cấm thành viên *mời thêm bot* vào nhóm (bật/tắt cờ kiểm soát này).
+
+📜 *Danh sách (cho phép/chặn theo từ khoá)*
+• `/whitelist_add <text>`
+  → Cho phép <text> bỏ qua chặn (áp dụng cho *link/mention/từ khoá*).
+  Ví dụ:
+  - `/whitelist_add youtube.com`  (cho phép link youtube)
+  - `/whitelist_add @myshop`      (cho phép mention @myshop)
+  - `/whitelist_add khuyen mai`   (cho phép cụm từ “khuyen mai”)
+
+• `/whitelist_remove <text>`  → Xoá khỏi whitelist
+• `/whitelist_list`           → Xem toàn bộ whitelist
+
+• `/blacklist_add <text>`
+  → Nếu *từ khoá/chuỗi* xuất hiện trong tin nhắn, bot sẽ xoá ngay.
+  Ví dụ:
+  - `/blacklist_add cờ bạc`
+  - `/blacklist_add lô đề`
+  - `/blacklist_add spamdomain.com`
+
+• `/blacklist_remove <text>` → Xoá khỏi blacklist
+• `/blacklist_list`          → Xem toàn bộ blacklist
+
+🧪 *Dùng thử Pro 7 ngày (chỉ admin)* 
+• `/trial7`
+  → Kích hoạt *Pro dùng thử* cho *nhóm hiện tại* trong 7 ngày (chỉ 1 lần/nhóm).
+  Khi hết hạn, bot tự tắt các tính năng Pro và nhắc trong nhóm.
+
+🔑 *Nâng cấp bằng key*
+• `/applykey <key>`  → Kích hoạt/gia hạn Pro bằng key
+• `/genkey <tháng>`  → *(Admin)* tạo key thử nghiệm nhanh. Ví dụ: `/genkey 1`
 """.strip()
 
 def _help_text_pro():
     return """💎 *HOTRO SECURITY PRO – ĐÃ KÍCH HOẠT*
 
-⚙️ *Cơ bản*
-/status – Xem cấu hình nhóm
-/nolinks on|off – Chặn link & mentions
-/noforwards on|off – Chặn forward
-/nobots on|off – Cấm bot vào nhóm
-/noevents on|off – Ẩn join/leave
-/antiflood on|off – Chống spam (3 tin / 20s)
+⚙️ *Cài đặt chính*
+• `/status`              → Xem cấu hình nhóm & hạn Pro
+• `/nolinks on|off`      → Chặn link & @mention (kết hợp whitelist)
+• `/noforwards on|off`   → Chặn tin nhắn forward
+• `/nobots on|off`       → Cấm mời thêm bot vào nhóm
+• `/noevents on|off`     → Ẩn join/leave message trong nhóm
+• `/antiflood on|off`    → Chống spam: *xoá khi >3 tin/20s/người*
+   Ví dụ: `/antiflood on`
 
 📜 *Danh sách*
-/whitelist_add <text> /whitelist_remove <text>
-/blacklist_add <text> /blacklist_remove <text>
-/whitelist_list /blacklist_list
+• `/whitelist_add <text>`  /  `/whitelist_remove <text>`  /  `/whitelist_list`
+   Ví dụ:
+   - `/whitelist_add t.me/mychannel`
+   - `/whitelist_add @brand_official`
+• `/blacklist_add <text>`   /  `/blacklist_remove <text>`  /  `/blacklist_list`
+   Ví dụ:
+   - `/blacklist_add tuyển CTV`
+   - `/blacklist_add scamdomain.xyz`
 
-🔑 *Key*
-/applykey <key> – Gia hạn/kích hoạt
-/genkey <tháng> – (Admin) tạo key
-/keys_list – (Admin) xem danh sách key
+🔑 *Quản lý key*
+• `/applykey <key>`  → Kích hoạt hoặc gia hạn Pro
+• `/genkey <tháng>`  → *(Admin)* tạo key dùng thử. Ví dụ: `/genkey 3`
+• `/keys_list`       → *(Admin)* xem danh sách key hiện có
+
+🧭 *Quy tắc hoạt động*
+• Admin *không bị chặn* bởi các bộ lọc (bypass).
+• *Blacklist ưu tiên:* nếu khớp, tin sẽ bị xoá ngay cả khi link/mention đã bật.
+• *Whitelist chỉ định:* cho phép các link/mention/từ khoá cụ thể vượt qua bộ lọc.
 """.strip()
 
 def help_cmd(update: Update, context: CallbackContext):
