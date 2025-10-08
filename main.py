@@ -1,7 +1,7 @@
 # HotroSecurityBot - Full version (Render + PTB 13.15)
-# - Free features: nolinks, noforwards, nobots, whitelist/blacklist (mặc định bật nolinks/noforwards/nobots)
-# - Pro (khóa): antiflood, noevents (ẩn join/leave), ... (mở bằng /applykey)
-# - Admin commands trả lời RIÊNG (DM). Nếu không thể DM (chưa /start hoặc chặn bot), bot sẽ thông báo rất ngắn trong nhóm.
+# Free: nolinks, noforwards, nobots, whitelist/blacklist
+# Pro (khóa): antiflood, noevents ... (/applykey)
+# Admin commands trả lời RIÊNG (DM). Nếu DM thất bại, nhắc ngắn trong nhóm.
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode
-from telegram.error import TelegramError, Forbidden
+from telegram.error import TelegramError, Unauthorized
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
@@ -62,13 +62,12 @@ def now_utc():
     return datetime.utcnow()
 
 def _send_dm(context: CallbackContext, user_id: int, text: str, **kwargs) -> bool:
-    """Gửi DM; trả True nếu thành công, False nếu bị chặn/chưa start."""
+    """Gửi DM; True nếu ok, False nếu bị chặn/chưa /start."""
     try:
         context.bot.send_message(chat_id=user_id, text=text, **kwargs)
         return True
-    except Forbidden as e:
-        # bot bị chặn / hoặc user chưa chat với bot / hoặc user là bot
-        logger.warning("DM forbidden to %s: %s", user_id, e)
+    except Unauthorized as e:
+        logger.warning("DM unauthorized/blocked to %s: %s", user_id, e)
         return False
     except TelegramError as e:
         logger.warning("DM error to %s: %s", user_id, e)
@@ -76,19 +75,15 @@ def _send_dm(context: CallbackContext, user_id: int, text: str, **kwargs) -> boo
 
 def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
     """
-    Gửi trả lời RIÊNG cho người gọi lệnh; nếu không DM được, nhắn ngắn gọn tại nhóm
-    để nhắc admin /start bot ở DM.
+    Trả lời RIÊNG cho người gọi lệnh; nếu không DM được, nhắn rất ngắn trong nhóm.
     """
     user = update.effective_user
     chat = update.effective_chat
-
     sent = False
     if user and not user.is_bot:
         sent = _send_dm(context, user.id, text, **kwargs)
-
     if not sent and chat and chat.type in ("group", "supergroup"):
         try:
-            # Thông báo rất ngắn, tránh lộ nội dung cấu hình cho toàn nhóm
             context.bot.send_message(
                 chat_id=chat.id,
                 text="📩 Không thể gửi DM. Vui lòng mở chat riêng và bấm */start* với bot để nhận hướng dẫn.",
@@ -131,7 +126,7 @@ def set_pro_until(chat_id: int, until_dt: datetime):
     cur.execute("UPDATE chat_settings SET pro_until=? WHERE chat_id=?", (until_dt.isoformat(), chat_id))
     conn.commit(); conn.close()
 
-# ===== whitelist / blacklist (DB ops) =====
+# ===== whitelist / blacklist =====
 def add_whitelist(chat_id, text):
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text))
@@ -205,7 +200,6 @@ def _is_flood(chat_id,user_id):
 
 # ================== COMMANDS ==================
 def start(update,context):
-    # Cho phép /start ở DM hoặc nhóm – nhưng hướng dẫn chi tiết sẽ gửi qua DM
     safe_reply_private(
         update,context,
         "🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.",
@@ -256,7 +250,6 @@ def _help_text_pro():
 def help_cmd(update,context):
     chat = update.effective_chat
     user_id = update.effective_user.id
-    # chỉ cho admin xem help (và gửi qua DM)
     if chat.type in ("group","supergroup") and not is_admin(user_id):
         return
     text = _help_text_pro() if is_pro(chat.id) else _help_text_free()
@@ -291,7 +284,7 @@ def nobots(u,c): _toggle(u,c,"nobots")
 def antiflood(u,c): _toggle(u,c,"antiflood",pro=True)
 def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 
-# ================== WHITELIST / BLACKLIST CMDS ==================
+# ================== WL/BL CMDS ==================
 def whitelist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
         safe_reply_private(update,context,"❌ Bạn không phải admin."); return
@@ -420,8 +413,7 @@ def start_bot():
 
     updater=Updater(BOT_TOKEN,use_context=True)
 
-    # Quan trọng: xóa webhook (nếu từng chạy webhook) + bỏ pending updates để
-    # tránh lỗi "Conflict: terminated by other getUpdates request"
+    # Xóa webhook + drop pending updates để tránh "Conflict: terminated by other getUpdates request"
     try:
         updater.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook deleted (if any).")
@@ -459,7 +451,6 @@ def start_bot():
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
 
     logger.info("🚀 Bot started (Polling).")
-    # v13 hỗ trợ drop_pending_updates trong start_polling
     updater.start_polling(drop_pending_updates=True)
     updater.idle()
 
