@@ -1,16 +1,19 @@
 # HotroSecurityBot - Fixed Full Version (Render + PTB 13.15)
-# Free features active by default, Pro locked properly, private admin replies (with safe fallback)
+# - Free features active by default
+# - Pro locked properly
+# - Admin notifications: DM first, fallback to ephemeral in-group message (auto-delete)
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
 from datetime import datetime, timedelta
+
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode
-from telegram.error import BadRequest, Unauthorized, TelegramError
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
+from telegram.error import Forbidden
 
 # ================== ENV ==================
 load_dotenv()
@@ -58,62 +61,34 @@ def is_admin(user_id: int) -> bool:
 def now_utc():
     return datetime.utcnow()
 
-def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
+def notify_admin(update: Update, context: CallbackContext, text: str, ttl_sec: int = 8, **kwargs):
     """
-    Gửi DM cho người gọi lệnh (admin). Nếu không gửi được (user chưa /start bot,
-    hoặc đó là tài khoản bot) thì fallback trả lời ngay trong nhóm.
+    Cố gửi DM cho người gọi lệnh; nếu Forbidden (chưa /start hoặc blocked),
+    gửi tin 'tạm' trong nhóm và tự xoá sau ttl_sec.
     """
-    user = update.effective_user
-    chat = update.effective_chat
-    msg = update.effective_message
-
-    # Không DM tới bot
-    if getattr(user, "is_bot", False):
-        try:
-            if msg:
-                msg.reply_text("⚠️ Không thể gửi tin nhắn riêng cho tài khoản bot.",
-                               disable_web_page_preview=True)
-        except Exception:
-            pass
-        return
-
     try:
-        context.bot.send_message(chat_id=user.id, text=text, **kwargs)
-    except Unauthorized as e:
-        # User chưa /start bot -> thông báo công khai
-        try:
-            if msg:
-                msg.reply_text(
-                    f"{text}\n\nℹ️ *Lưu ý:* Hãy mở chat riêng với bot và bấm /start để nhận DM lần sau.",
-                    parse_mode=kwargs.get("parse_mode"),
-                    disable_web_page_preview=True,
-                )
-            else:
-                context.bot.send_message(chat_id=chat.id, text=f"📩 {text}")
-        except Exception:
-            pass
-        logger.warning("safe_reply_private Unauthorized fallback: %s", e)
-    except BadRequest as e:
-        try:
-            if msg:
-                msg.reply_text(text, **kwargs)
-            else:
-                context.bot.send_message(chat_id=chat.id, text=text, **kwargs)
-        except Exception:
-            pass
-        logger.warning("safe_reply_private BadRequest fallback: %s", e)
-    except TelegramError as e:
-        # Bắt mọi lỗi Telegram khác và fallback
-        try:
-            if msg:
-                msg.reply_text(text, **kwargs)
-            else:
-                context.bot.send_message(chat_id=chat.id, text=text, **kwargs)
-        except Exception:
-            pass
-        logger.warning("safe_reply_private TelegramError fallback: %s", e)
+        # Không cố gắng DM đến bot (tránh Forbidden vô nghĩa)
+        if update.effective_user and not update.effective_user.is_bot:
+            context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
+            return
+    except Forbidden:
+        pass
     except Exception as e:
-        logger.warning("safe_reply_private error: %s", e)
+        logger.warning("DM fail: %s", e)
+
+    # Fallback: gửi trong nhóm rồi tự xoá
+    try:
+        msg = update.effective_message.reply_text(
+            text + "\n_(Tin nhắn tạm, sẽ tự xoá)_",
+            parse_mode=kwargs.get("parse_mode"),
+            disable_web_page_preview=True
+        )
+        def _del():
+            try: context.bot.delete_message(update.effective_chat.id, msg.message_id)
+            except Exception: pass
+        threading.Timer(ttl_sec, _del).start()
+    except Exception as e2:
+        logger.warning("group fallback fail: %s", e2)
 
 def get_setting(chat_id: int):
     conn = _conn(); cur = conn.cursor()
@@ -186,7 +161,7 @@ def gen_key(months=1):
     expires = created + timedelta(days=30*int(months))
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO pro_keys(key,months,created_at,expires_at) VALUES(?,?,?,?)",
-        (key,months,created.isoformat(),expires.isoformat()))
+                (key,months,created.isoformat(),expires.isoformat()))
     conn.commit();conn.close()
     return key,expires
 
@@ -222,7 +197,7 @@ def _is_flood(chat_id,user_id):
 
 # ================== COMMANDS ==================
 def start(update,context):
-    safe_reply_private(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
+    notify_admin(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
 
 def _help_text_free():
     return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
@@ -259,10 +234,6 @@ def _help_text_pro():
 /blacklist_add <text> /blacklist_remove <text>
 /whitelist_list /blacklist_list
 
-📣 *Quảng cáo tự động (nếu bạn bổ sung sau này)*
-/ads_add <phút> <nội dung>
-/ads_list | /ads_pause <id> | /ads_resume <id> | /ads_delete <id>
-
 🔑 *Quản lý key*
 /applykey <key> – Gia hạn / kích hoạt Pro
 /genkey <tháng> – (Admin) tạo key mới
@@ -272,19 +243,12 @@ def _help_text_pro():
 def help_cmd(update,context):
     chat = update.effective_chat
     user_id = update.effective_user.id
-
-    # chỉ cho admin xem help (và gửi qua DM)
+    # chỉ cho admin xem help chi tiết (và gửi qua DM / fallback)
     if chat.type in ("group","supergroup") and not is_admin(user_id):
         return
-
     pro = is_pro(chat.id)
     text = _help_text_pro() if pro else _help_text_free()
-
-    if chat.type in ("group","supergroup"):
-        safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
-        safe_reply_private(update,context,"📩 Đã gửi hướng dẫn chi tiết qua tin nhắn riêng (DM).")
-    else:
-        safe_reply_private(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
+    notify_admin(update,context,text,parse_mode=ParseMode.MARKDOWN,disable_web_page_preview=True)
 
 def status(update,context):
     s=get_setting(update.effective_chat.id)
@@ -295,19 +259,19 @@ def status(update,context):
          f"antiflood={s['antiflood']} | noevents={s['noevents']}\n{pro_txt}\n"
          f"Whitelist: {', '.join(wl) if wl else '(none)'}\n"
          f"Blacklist: {', '.join(bl) if bl else '(none)'}")
-    safe_reply_private(update,context,txt)
+    notify_admin(update,context,txt)
 
 # ================== TOGGLES ==================
 def _toggle(update,context,field,pro=False):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin.");return
+        notify_admin(update,context,"❌ Bạn không phải admin.");return
     if pro and not is_pro(update.effective_chat.id):
-        safe_reply_private(update,context,f"🔒 {field} chỉ dành cho Pro.");return
+        notify_admin(update,context,f"🔒 {field} chỉ dành cho Pro.");return
     if not context.args or context.args[0].lower() not in ("on","off"):
-        safe_reply_private(update,context,f"Usage: /{field} on|off");return
+        notify_admin(update,context,f"Usage: /{field} on|off");return
     val=1 if context.args[0].lower()=="on" else 0
     set_setting(update.effective_chat.id,field,val)
-    safe_reply_private(update,context,f"✅ {field} = {'on' if val else 'off'}")
+    notify_admin(update,context,f"✅ {field} = {'on' if val else 'off'}")
 
 def nolinks(u,c): _toggle(u,c,"nolinks")
 def noforwards(u,c): _toggle(u,c,"noforwards")
@@ -318,80 +282,82 @@ def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 # ================== WHITELIST / BLACKLIST CMDS ==================
 def whitelist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        safe_reply_private(update,context,"Usage: /whitelist_add <text>"); return
+        notify_admin(update,context,"Usage: /whitelist_add <text>"); return
     add_whitelist(update.effective_chat.id, " ".join(context.args).strip())
-    safe_reply_private(update,context,"✅ Đã thêm vào whitelist.")
+    notify_admin(update,context,"✅ Đã thêm vào whitelist.")
 
 def whitelist_remove_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        safe_reply_private(update,context,"Usage: /whitelist_remove <text>"); return
+        notify_admin(update,context,"Usage: /whitelist_remove <text>"); return
     remove_whitelist(update.effective_chat.id, " ".join(context.args).strip())
-    safe_reply_private(update,context,"✅ Đã xoá khỏi whitelist.")
+    notify_admin(update,context,"✅ Đã xoá khỏi whitelist.")
 
 def whitelist_list_cmd(update,context):
     wl = list_whitelist(update.effective_chat.id)
-    safe_reply_private(update,context,"📄 Whitelist:\n" + ("\n".join(wl) if wl else "(trống)"))
+    notify_admin(update,context,"📄 Whitelist:\n" + ("\n".join(wl) if wl else "(trống)"))
 
 def blacklist_add_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        safe_reply_private(update,context,"Usage: /blacklist_add <text>"); return
+        notify_admin(update,context,"Usage: /blacklist_add <text>"); return
     add_blacklist(update.effective_chat.id, " ".join(context.args).strip())
-    safe_reply_private(update,context,"✅ Đã thêm vào blacklist.")
+    notify_admin(update,context,"✅ Đã thêm vào blacklist.")
 
 def blacklist_remove_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     if not context.args:
-        safe_reply_private(update,context,"Usage: /blacklist_remove <text>"); return
+        notify_admin(update,context,"Usage: /blacklist_remove <text>"); return
     remove_blacklist(update.effective_chat.id, " ".join(context.args).strip())
-    safe_reply_private(update,context,"✅ Đã xoá khỏi blacklist.")
+    notify_admin(update,context,"✅ Đã xoá khỏi blacklist.")
 
 def blacklist_list_cmd(update,context):
     bl = list_blacklist(update.effective_chat.id)
-    safe_reply_private(update,context,"📄 Blacklist:\n" + ("\n".join(bl) if bl else "(trống)"))
+    notify_admin(update,context,"📄 Blacklist:\n" + ("\n".join(bl) if bl else "(trống)"))
 
 # ================== KEY CMDS ==================
 def genkey_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     months = 1
     if context.args:
         try: months = int(context.args[0])
         except:
-            safe_reply_private(update,context,"Usage: /genkey <tháng>"); return
+            notify_admin(update,context,"Usage: /genkey <tháng>"); return
     k, exp = gen_key(months)
-    safe_reply_private(update,context,
-        f"🔑 Key: `{k}`\nHiệu lực {months} tháng (tạo đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
-        parse_mode=ParseMode.MARKDOWN)
+    notify_admin(
+        update,context,
+        f"🔑 Key: `{k}`\nHiệu lực {months} tháng (đến {exp.strftime('%d/%m/%Y %H:%M UTC')}).",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 def keys_list_cmd(update,context):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update,context,"❌ Bạn không phải admin."); return
+        notify_admin(update,context,"❌ Bạn không phải admin."); return
     rows = list_keys()
     if not rows:
-        safe_reply_private(update,context,"(Chưa có key)"); return
+        notify_admin(update,context,"(Chưa có key)"); return
     out = ["🗝 Danh sách key:"]
     for k, m, c, e, u in rows:
         out.append(f"{k} | {m} tháng | tạo:{c} | hết hạn:{e} | used_by:{u}")
-    safe_reply_private(update,context,"\n".join(out))
+    notify_admin(update,context,"\n".join(out))
 
 def applykey_cmd(update,context):
     if not context.args:
-        safe_reply_private(update,context,"Usage: /applykey <key>");return
+        notify_admin(update,context,"Usage: /applykey <key>");return
     ok,reason,months=consume_key(context.args[0].strip(),update.effective_user.id)
     if not ok:
         m={"invalid":"❌ Key sai","used":"❌ Key đã dùng","expired":"❌ Key hết hạn"}[reason]
-        safe_reply_private(update,context,m);return
+        notify_admin(update,context,m);return
     s=get_setting(update.effective_chat.id)
     base=s["pro_until"] if s["pro_until"] and s["pro_until"]>now_utc() else now_utc()
     new=base+timedelta(days=30*months); set_pro_until(update.effective_chat.id,new)
-    safe_reply_private(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
+    notify_admin(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
 
 # ================== MESSAGE HANDLER ==================
 def message_handler(update,context):
@@ -405,7 +371,7 @@ def message_handler(update,context):
     # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
         try: msg.delete()
-        except Exception: pass
+        except: pass
         return
 
     # Link & mention filter (Free)
@@ -413,19 +379,19 @@ def message_handler(update,context):
     if s["nolinks"]:
         if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
             try: msg.delete()
-            except Exception: pass
+            except: pass
             return
         if mentions:
             for m in mentions:
                 if not any(w.lower() in m.lower() for w in wl):
                     try: msg.delete()
-                    except Exception: pass
+                    except: pass
                     return
 
     # Forwards (Free)
     if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
         try: msg.delete()
-        except Exception: pass
+        except: pass
         return
 
     # Anti-flood (Pro)
@@ -434,7 +400,7 @@ def message_handler(update,context):
             return
         if _is_flood(chat_id,user_id):
             try: msg.delete()
-            except Exception: pass
+            except: pass
             return
 
 # ================== BOOT ==================
@@ -473,7 +439,7 @@ def start_bot():
     # messages
     dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
 
-    logger.info("🚀 Bot started")
+    logger.info("🚀 Bot started (Polling). Nếu gặp lỗi 'Conflict', hãy chắc chắn chỉ 1 instance dùng BOT_TOKEN này đang chạy.")
     updater.start_polling()
     updater.idle()
 
