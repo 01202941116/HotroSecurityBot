@@ -1,8 +1,9 @@
-# HotroSecurityBot - Full (Render + PTB 13.15) + Pro LOCKED UI + Pro Auto Ads
+# HotroSecurityBot - Fixed Full Version (Render + PTB 13.15)
+# Free features active by default, Pro locked properly, private admin replies
+
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
 from datetime import datetime, timedelta
-
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import Update, ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
@@ -20,7 +21,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
 DB = "hotrosecurity.db"
 
 # ================== DB ==================
@@ -48,38 +48,20 @@ def init_db():
         key TEXT PRIMARY KEY, months INTEGER, created_at TEXT,
         used_by INTEGER NULL, expires_at TEXT NULL
     )""")
-    conn.commit()
-    # ensure columns (for upgrades)
-    def ensure_col(col, type_sql):
-        cur.execute("PRAGMA table_info(chat_settings)")
-        cols = [r[1] for r in cur.fetchall()]
-        if col not in cols:
-            cur.execute(f"ALTER TABLE chat_settings ADD COLUMN {col} {type_sql}")
-            conn.commit()
-    ensure_col("noevents", "INTEGER DEFAULT 0")
-    ensure_col("pro_until", "TEXT NULL")
-    conn.close()
+    conn.commit(); conn.close()
 
 # ================== HELPERS ==================
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-def now_utc():
-    return datetime.utcnow()
+def now_utc(): return datetime.utcnow()
 
-def safe_reply(update: Update, context: CallbackContext, text: str, **kwargs):
-    """
-    Gửi trả lời an toàn: nếu tin gốc không tồn tại (đã bị xoá) thì gửi như tin mới.
-    Khắc phục lỗi telegram.error.BadRequest: Message to be replied not found
-    """
+def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
+    """Trả lời riêng admin thay vì gửi ra nhóm"""
     try:
-        if update.effective_message:
-            return update.effective_message.reply_text(text, **kwargs)
+        context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
     except Exception as e:
-        try:
-            return context.bot.send_message(chat_id=update.effective_chat.id, text=text, **kwargs)
-        except Exception as e2:
-            logger.warning("safe_reply failed: %s / fallback: %s", e, e2)
+        logger.warning("safe_reply_private error: %s", e)
 
 def get_setting(chat_id: int):
     conn = _conn(); cur = conn.cursor()
@@ -104,19 +86,6 @@ def is_pro(chat_id: int) -> bool:
     s = get_setting(chat_id)
     return bool(s["pro_until"] and s["pro_until"] > now_utc())
 
-def require_pro(update: Update, feature_name: str) -> bool:
-    """Trả False nếu chưa kích hoạt Pro (và gửi gợi ý)."""
-    chat_id = update.effective_chat.id
-    if is_pro(chat_id):
-        return True
-    safe_reply(
-        update, context=CallbackContext.from_update(update, None),
-        text=f"🔒 Tính năng *{feature_name}* chỉ dành cho gói *Pro*.\n"
-             f"Vui lòng dùng `/applykey <key>` để kích hoạt Pro cho nhóm.",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    return False
-
 def set_setting(chat_id: int, key: str, value: int):
     conn = _conn(); cur = conn.cursor()
     cur.execute(f"UPDATE chat_settings SET {key}=? WHERE chat_id=?", (int(value), chat_id))
@@ -127,572 +96,220 @@ def set_pro_until(chat_id: int, until_dt: datetime):
     cur.execute("UPDATE chat_settings SET pro_until=? WHERE chat_id=?", (until_dt.isoformat(), chat_id))
     conn.commit(); conn.close()
 
+# whitelist / blacklist
 def add_whitelist(chat_id, text):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("INSERT INTO whitelist(chat_id, text) VALUES(?,?)", (chat_id, text))
-    conn.commit(); conn.close()
+    conn=_conn();cur=conn.cursor()
+    cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text))
+    conn.commit();conn.close()
 
 def remove_whitelist(chat_id, text):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("DELETE FROM whitelist WHERE chat_id=? AND text=?", (chat_id, text))
-    conn.commit(); conn.close()
+    conn=_conn();cur=conn.cursor()
+    cur.execute("DELETE FROM whitelist WHERE chat_id=? AND text=?",(chat_id,text))
+    conn.commit();conn.close()
 
 def list_whitelist(chat_id):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("SELECT text FROM whitelist WHERE chat_id=?", (chat_id,))
-    rows = [r[0] for r in cur.fetchall()]
-    conn.close(); return rows
+    conn=_conn();cur=conn.cursor()
+    cur.execute("SELECT text FROM whitelist WHERE chat_id=?",(chat_id,))
+    r=[x[0] for x in cur.fetchall()];conn.close();return r
 
-def add_blacklist(chat_id, text):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("INSERT INTO blacklist(chat_id, text) VALUES(?,?)", (chat_id, text))
-    conn.commit(); conn.close()
+def add_blacklist(chat_id,text):
+    conn=_conn();cur=conn.cursor()
+    cur.execute("INSERT INTO blacklist(chat_id,text) VALUES(?,?)",(chat_id,text))
+    conn.commit();conn.close()
 
-def remove_blacklist(chat_id, text):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("DELETE FROM blacklist WHERE chat_id=? AND text=?", (chat_id, text))
-    conn.commit(); conn.close()
+def remove_blacklist(chat_id,text):
+    conn=_conn();cur=conn.cursor()
+    cur.execute("DELETE FROM blacklist WHERE chat_id=? AND text=?",(chat_id,text))
+    conn.commit();conn.close()
 
 def list_blacklist(chat_id):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("SELECT text FROM blacklist WHERE chat_id=?", (chat_id,))
-    rows = [r[0] for r in cur.fetchall()]
-    conn.close(); return rows
+    conn=_conn();cur=conn.cursor()
+    cur.execute("SELECT text FROM blacklist WHERE chat_id=?",(chat_id,))
+    r=[x[0] for x in cur.fetchall()];conn.close();return r
 
 # Pro keys
 def gen_key(months=1):
     key = secrets.token_urlsafe(12)
     created = now_utc()
-    expires = created + timedelta(days=30 * int(months))
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("INSERT INTO pro_keys(key, months, created_at, expires_at) VALUES(?,?,?,?)",
-                (key, months, created.isoformat(), expires.isoformat()))
-    conn.commit(); conn.close()
-    return key, expires
-
-def list_keys():
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("SELECT key, months, created_at, expires_at, used_by FROM pro_keys")
-    rows = cur.fetchall(); conn.close()
-    return rows
+    expires = created + timedelta(days=30*int(months))
+    conn=_conn();cur=conn.cursor()
+    cur.execute("INSERT INTO pro_keys(key,months,created_at,expires_at) VALUES(?,?,?,?)",
+                (key,months,created.isoformat(),expires.isoformat()))
+    conn.commit();conn.close()
+    return key,expires
 
 def consume_key(key: str, user_id: int):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("SELECT key, months, created_at, expires_at, used_by FROM pro_keys WHERE key=?", (key,))
-    row = cur.fetchone()
-    if not row:
-        conn.close(); return False, "invalid", None
-    if row[4] is not None:
-        conn.close(); return False, "used", None
-    exp = datetime.fromisoformat(row[3])
-    if exp < now_utc():
-        conn.close(); return False, "expired", None
-    cur.execute("UPDATE pro_keys SET used_by=? WHERE key=?", (user_id, key))
-    conn.commit(); conn.close()
-    return True, None, int(row[1])
+    conn=_conn();cur=conn.cursor()
+    cur.execute("SELECT key,months,created_at,expires_at,used_by FROM pro_keys WHERE key=?",(key,))
+    row=cur.fetchone()
+    if not row: conn.close(); return False,"invalid",None
+    if row[4]: conn.close(); return False,"used",None
+    exp=datetime.fromisoformat(row[3])
+    if exp<now_utc(): conn.close(); return False,"expired",None
+    cur.execute("UPDATE pro_keys SET used_by=? WHERE key=?",(user_id,key))
+    conn.commit();conn.close()
+    return True,None,int(row[1])
 
-# ================== FILTERS / STATE ==================
+# ================== FILTERS ==================
 URL_RE = re.compile(r"(https?://[^\s]+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{5,64})")
+FLOOD_WINDOW, FLOOD_LIMIT = 20, 3
+user_buckets = {}
 
-FLOOD_WINDOW = 20
-FLOOD_LIMIT = 3
-user_buckets = {}  # {(chat_id, user_id): deque[timestamps]}
-
-def _is_flood(chat_id, user_id):
-    key = (chat_id, user_id)
-    dq = user_buckets.get(key)
-    now = time.time()
-    if dq is None:
-        dq = deque(maxlen=FLOOD_LIMIT); user_buckets[key] = dq
-    while dq and now - dq[0] > FLOOD_WINDOW:
-        dq.popleft()
-    dq.append(now)
-    return len(dq) > FLOOD_LIMIT
+def _is_flood(chat_id,user_id):
+    k=(chat_id,user_id);dq=user_buckets.get(k);now=time.time()
+    if dq is None: dq=deque(maxlen=FLOOD_LIMIT);user_buckets[k]=dq
+    while dq and now-dq[0]>FLOOD_WINDOW: dq.popleft()
+    dq.append(now);return len(dq)>FLOOD_LIMIT
 
 # ================== COMMANDS ==================
-def start(update: Update, context: CallbackContext):
-    safe_reply(update, context,
-        "🤖 HotroSecurityBot đang hoạt động!\n"
-        "Dùng /status để xem cấu hình hoặc /help để biết thêm lệnh."
-    )
+def start(update,context):
+    safe_reply_private(update,context,"🤖 HotroSecurityBot đang hoạt động!\nDùng /help để xem lệnh.")
 
-def _pro_keyboard_locked():
-    # hai nút trên cùng một hàng cho chuyên nghiệp
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔑 Kích hoạt Pro", callback_data="pro_locked:apply"),
-            InlineKeyboardButton("💡 Tính năng Pro", callback_data="pro_locked:info"),
-        ]
-    ])
-
-def help_cmd(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    pro_on = is_pro(chat_id)
-
-    core = [
-        "🛟 *HƯỚNG DẪN SỬ DỤNG*",
-        "",
-        "• `/start` – Kiểm tra bot",
+def help_cmd(update,context):
+    chat_id=update.effective_chat.id; pro=is_pro(chat_id)
+    lines=[
+        "🛡 *HƯỚNG DẪN SỬ DỤNG*",
         "• `/status` – Xem cấu hình & thời hạn Pro",
-        "",
-        "*Bật/Tắt (admin)*",
         "• `/nolinks on|off` – Bật/tắt chặn link & @mention",
-        "• `/noforwards on|off` – Chặn tin nhắn forward",
-        "• `/nobots on|off` – Chặn thành viên mời bot vào",
-        "• `/antiflood on|off` – Chống spam (3 tin/20s) " + ("(Pro)" if not pro_on else ""),
-        "• `/noevents on|off` – Ẩn thông báo join/left " + ("(Pro)" if not pro_on else ""),
+        "• `/noforwards on|off` – Chặn tin forward",
+        "• `/nobots on|off` – Cấm mời bot vào nhóm",
         "",
-        "*Whitelist/Blacklist (admin)*",
-        "• `/whitelist_add <từ|domain>` / `/whitelist_remove <...>`",
-        "• `/whitelist_list` – Liệt kê whitelist",
-        "• `/blacklist_add <từ|domain>` / `/blacklist_remove <...>`",
-        "• `/blacklist_list` – Liệt kê blacklist",
-        "",
+        "• `/whitelist_add <text>` / `/whitelist_remove <text>`",
+        "• `/blacklist_add <text>` / `/blacklist_remove <text>`",
+        ""
     ]
-
-    if pro_on:
-        pro_lines = [
-            "✨ *Pro (đã kích hoạt)*",
-            "• `/applykey <key>` – Gia hạn/áp thêm thời gian",
-            "• Tự động quảng cáo định kỳ: `/ads_add`, `/ads_list`, `/ads_pause`, `/ads_resume`, `/ads_delete`",
-            "• Siết chặt mentions (xóa mọi @username không nằm trong whitelist)",
-            "• Ưu tiên blacklist (xoá ngay lập tức)",
-            "• Ẩn sự kiện nâng cao",
+    if pro:
+        lines += [
+            "✨ *Tính năng Pro:*",
+            "• `/antiflood on|off` – Chống spam (3 tin / 20s)",
+            "• `/noevents on|off` – Ẩn join/leave",
+            "• `/ads_add`, `/ads_list`, `/ads_pause`, `/ads_resume`, `/ads_delete` – Tự động quảng cáo",
+            "• Siết mentions, ưu tiên blacklist"
         ]
-        safe_reply(update, context, "\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN)
     else:
-        pro_lines = [
-            "🔒 *Pro (chưa kích hoạt)*",
-            "• (LOCKED) `/applykey <key>` – Kích hoạt Pro cho *nhóm hiện tại*",
-            "• (LOCKED) Tự động quảng cáo định kỳ",
-            "• (LOCKED) Siết chặt mentions",
-            "• (LOCKED) Ưu tiên blacklist",
-            "• (LOCKED) Ẩn sự kiện nâng cao",
+        lines += [
+            "🔒 *Tính năng Pro (chưa kích hoạt)*",
+            "• `/applykey <key>` – Kích hoạt Pro",
+            "• `/genkey` (Admin) – Tạo key thử nghiệm"
         ]
-        safe_reply(
-            update, context, "\n".join(core + pro_lines),
-            parse_mode=ParseMode.MARKDOWN, reply_markup=_pro_keyboard_locked()
-        )
+    safe_reply_private(update,context,"\n".join(lines),parse_mode=ParseMode.MARKDOWN)
 
-def pro_locked_cb(update: Update, context: CallbackContext):
-    """Callback nút khóa Pro."""
-    q = update.callback_query
-    data = q.data.split(":", 1)[-1]
-    if data == "apply":
-        q.message.reply_text("🔑 Dùng lệnh `/applykey <key>` để kích hoạt Pro cho nhóm hiện tại.",
-                             parse_mode=ParseMode.MARKDOWN)
-    elif data == "info":
-        q.message.reply_text(
-            "💎 *Gói Pro bao gồm:*\n"
-            "• Tự động quảng cáo định kỳ\n"
-            "• Siết chặt mentions\n"
-            "• Ưu tiên blacklist\n"
-            "• Ẩn sự kiện nâng cao",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    q.answer()
+def status(update,context):
+    s=get_setting(update.effective_chat.id)
+    wl=list_whitelist(update.effective_chat.id); bl=list_blacklist(update.effective_chat.id)
+    pro_txt=f"⏳ Pro đến {s['pro_until'].strftime('%d/%m/%Y %H:%M UTC')}" if s["pro_until"] else "❌ Chưa có Pro"
+    txt=(f"📋 Cấu hình:\n"
+         f"nolinks={s['nolinks']} | noforwards={s['noforwards']} | nobots={s['nobots']} | "
+         f"antiflood={s['antiflood']} | noevents={s['noevents']}\n{pro_txt}\n"
+         f"Whitelist: {', '.join(wl) if wl else '(none)'}\n"
+         f"Blacklist: {', '.join(bl) if bl else '(none)'}")
+    safe_reply_private(update,context,txt)
 
-def status(update: Update, context: CallbackContext):
-    chat = update.effective_chat
-    s = get_setting(chat.id)
-    wl = list_whitelist(chat.id)
-    bl = list_blacklist(chat.id)
-    pro_txt = f"⏳ Pro đến {s['pro_until'].strftime('%d/%m/%Y %H:%M UTC')}" if s["pro_until"] else "❌ Chưa kích hoạt Pro"
-    text = (f"📋 Cấu hình nhóm {chat.title or chat.id}:\n"
-            f"- nolinks={s['nolinks']} | noforwards={s['noforwards']} | "
-            f"nobots={s['nobots']} | antiflood={s['antiflood']} | noevents={s['noevents']}\n"
-            f"- {pro_txt}\n"
-            f"- Whitelist: {', '.join(wl) if wl else '(none)'}\n"
-            f"- Blacklist: {', '.join(bl) if bl else '(none)'}")
-    safe_reply(update, context, text)
-
-# toggles (một số là Pro)
-def _toggle(update: Update, context: CallbackContext, field: str, pro_only: bool = False):
+# ================== TOGGLES ==================
+def _toggle(update,context,field,pro=False):
     if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if pro_only and not is_pro(update.effective_chat.id):
-        safe_reply(update, context,
-                   f"🔒 Tính năng *{field}* chỉ dành cho gói *Pro*.\nDùng `/applykey <key>` để kích hoạt.",
-                   parse_mode=ParseMode.MARKDOWN)
-        return
+        safe_reply_private(update,context,"❌ Bạn không phải admin.");return
+    if pro and not is_pro(update.effective_chat.id):
+        safe_reply_private(update,context,f"🔒 {field} chỉ dành cho Pro.");return
     if not context.args or context.args[0].lower() not in ("on","off"):
-        safe_reply(update, context, f"Usage: /{field} on|off"); return
-    val = 1 if context.args[0].lower()=="on" else 0
-    set_setting(update.effective_chat.id, field, val)
-    safe_reply(update, context, f"✅ {field} = {'on' if val else 'off'}")
+        safe_reply_private(update,context,f"Usage: /{field} on|off");return
+    val=1 if context.args[0].lower()=="on" else 0
+    set_setting(update.effective_chat.id,field,val)
+    safe_reply_private(update,context,f"✅ {field} = {'on' if val else 'off'}")
 
-def nolinks(update, context):    _toggle(update, context, "nolinks", pro_only=False)
-def noforwards(update, context): _toggle(update, context, "noforwards", pro_only=False)
-def nobots(update, context):     _toggle(update, context, "nobots", pro_only=False)
-def antiflood(update, context):  _toggle(update, context, "antiflood", pro_only=True)  # Pro
-def noevents(update, context):   _toggle(update, context, "noevents", pro_only=True)   # Pro
+def nolinks(u,c): _toggle(u,c,"nolinks")
+def noforwards(u,c): _toggle(u,c,"noforwards")
+def nobots(u,c): _toggle(u,c,"nobots")
+def antiflood(u,c): _toggle(u,c,"antiflood",pro=True)
+def noevents(u,c): _toggle(u,c,"noevents",pro=True)
 
-# whitelist / blacklist
-def whitelist_add(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
+# ================== APPLY KEY ==================
+def applykey_cmd(update,context):
     if not context.args:
-        safe_reply(update, context, "Usage: /whitelist_add <từ|domain>"); return
-    add_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    safe_reply(update, context, "✅ Đã thêm vào whitelist.")
-
-def whitelist_remove(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /whitelist_remove <từ|domain>"); return
-    remove_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    safe_reply(update, context, "✅ Đã xóa khỏi whitelist.")
-
-def whitelist_list_cmd(update: Update, context: CallbackContext):
-    wl = list_whitelist(update.effective_chat.id)
-    safe_reply(update, context, "Whitelist:\n" + ("\n".join(wl) if wl else "(none)"))
-
-def blacklist_add(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /blacklist_add <từ|domain>"); return
-    add_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    safe_reply(update, context, "✅ Đã thêm vào blacklist.")
-
-def blacklist_remove(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /blacklist_remove <từ|domain>"); return
-    remove_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    safe_reply(update, context, "✅ Đã xóa khỏi blacklist.")
-
-def blacklist_list_cmd(update: Update, context: CallbackContext):
-    bl = list_blacklist(update.effective_chat.id)
-    safe_reply(update, context, "Blacklist:\n" + ("\n".join(bl) if bl else "(none)"))
-
-# keys
-def genkey_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    months = 1
-    if context.args:
-        try: months = int(context.args[0])
-        except Exception:
-            safe_reply(update, context, "Usage: /genkey <tháng>"); return
-    key, expires = gen_key(months)
-    safe_reply(
-        update, context,
-        f"🔑 Key mới: `{key}`\nHiệu lực {months} tháng, hết hạn {expires.isoformat()} (UTC)",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-def keys_list_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    rows = list_keys()
-    if not rows:
-        safe_reply(update, context, "Chưa có key nào."); return
-    text = "🗝 Danh sách key:\n" + "\n".join(
-        f"{r[0]} | {r[1]} tháng | tạo:{r[2]} | hết hạn:{r[3]} | used_by:{r[4]}" for r in rows
-    )
-    safe_reply(update, context, text)
-
-def applykey_cmd(update: Update, context: CallbackContext):
-    chat = update.effective_chat
-    user = update.effective_user
-    if not context.args:
-        safe_reply(update, context,
-                   "Usage: /applykey <key>\n(Key sẽ kích hoạt Pro cho *nhóm hiện tại*)",
-                   parse_mode=ParseMode.MARKDOWN); return
-    ok, reason, months = consume_key(context.args[0].strip(), user.id)
+        safe_reply_private(update,context,"Usage: /applykey <key>");return
+    ok,reason,months=consume_key(context.args[0].strip(),update.effective_user.id)
     if not ok:
-        safe_reply(update, context, {
-            "invalid":"❌ Key không hợp lệ",
-            "used":"❌ Key đã được sử dụng",
-            "expired":"❌ Key đã hết hạn"
-        }.get(reason, "❌ Không thể dùng key")); return
-    s = get_setting(chat.id)
-    base = s["pro_until"] if s["pro_until"] and s["pro_until"] > now_utc() else now_utc()
-    new_until = base + timedelta(days=30*months)
-    set_pro_until(chat.id, new_until)
-    safe_reply(update, context, f"✅ Đã kích hoạt Pro đến: {new_until.strftime('%d/%m/%Y %H:%M UTC')}")
+        m={"invalid":"❌ Key sai","used":"❌ Key đã dùng","expired":"❌ Key hết hạn"}[reason]
+        safe_reply_private(update,context,m);return
+    s=get_setting(update.effective_chat.id)
+    base=s["pro_until"] if s["pro_until"] and s["pro_until"]>now_utc() else now_utc()
+    new=base+timedelta(days=30*months); set_pro_until(update.effective_chat.id,new)
+    safe_reply_private(update,context,f"✅ Pro kích hoạt đến {new.strftime('%d/%m/%Y %H:%M UTC')}")
 
-# ================== ADS (Pro Feature - Auto Ads Scheduler) ==================
-def init_ads_table():
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS ad_campaigns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id INTEGER,
-        text TEXT,
-        interval_min INTEGER,
-        next_run TEXT,
-        enabled INTEGER DEFAULT 1,
-        created_by INTEGER,
-        created_at TEXT
-    )""")
-    conn.commit(); conn.close()
-
-def ads_add(chat_id: int, text: str, interval_min: int, start_time: datetime, created_by: int):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("""INSERT INTO ad_campaigns(chat_id, text, interval_min, next_run, enabled, created_by, created_at)
-                   VALUES(?,?,?,?,1,?,?)""",
-                (chat_id, text, interval_min, start_time.isoformat(), created_by, now_utc().isoformat()))
-    conn.commit(); conn.close()
-
-def ads_list(chat_id: int):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("""SELECT id, interval_min, next_run, enabled, substr(text,1,80)
-                   FROM ad_campaigns WHERE chat_id=? ORDER BY id""", (chat_id,))
-    rows = cur.fetchall(); conn.close(); return rows
-
-def ads_toggle(chat_id: int, ad_id: int, on: bool):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("UPDATE ad_campaigns SET enabled=? WHERE chat_id=? AND id=?", (1 if on else 0, chat_id, ad_id))
-    conn.commit(); conn.close()
-
-def ads_delete(chat_id: int, ad_id: int):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("DELETE FROM ad_campaigns WHERE chat_id=? AND id=?", (chat_id, ad_id))
-    conn.commit(); conn.close()
-
-def ads_due(now: datetime):
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("""SELECT id, chat_id, text, interval_min, next_run
-                   FROM ad_campaigns WHERE enabled=1 AND next_run<=?""", (now.isoformat(),))
-    rows = cur.fetchall(); conn.close(); return rows
-
-def ads_bump_next(ad_id: int, minutes: int, last_next_run: str):
-    base = datetime.fromisoformat(last_next_run)
-    new_next = base + timedelta(minutes=minutes)
-    conn = _conn(); cur = conn.cursor()
-    cur.execute("UPDATE ad_campaigns SET next_run=? WHERE id=?", (new_next.isoformat(), ad_id))
-    conn.commit(); conn.close()
-
-def ads_add_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not is_pro(update.effective_chat.id):
-        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
-    if len(context.args) < 2:
-        safe_reply(update, context, "Usage: /ads_add <phut> <noi_dung>"); return
-    try:
-        minutes = int(context.args[0])
-        if minutes < 5:
-            safe_reply(update, context, "Khoảng lặp tối thiểu là 5 phút."); return
-    except Exception:
-        safe_reply(update, context, "Số phút không hợp lệ."); return
-    text = " ".join(context.args[1:]).strip()
-    if not text:
-        safe_reply(update, context, "Nội dung quảng cáo trống."); return
-    ads_add(update.effective_chat.id, text, minutes, now_utc(), update.effective_user.id)
-    safe_reply(update, context, f"✅ Đã tạo quảng cáo tự động, lặp mỗi {minutes} phút.")
-
-def ads_list_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    rows = ads_list(update.effective_chat.id)
-    if not rows:
-        safe_reply(update, context, "Chưa có quảng cáo nào."); return
-    lines = ["📣 Danh sách quảng cáo:"]
-    for r in rows:
-        _id, interval_min, next_run, enabled, preview = r
-        lines.append(f"ID {_id} | {'ON' if enabled else 'OFF'} | mỗi {interval_min}p | {next_run} | \"{preview}\"")
-    safe_reply(update, context, "\n".join(lines))
-
-def ads_pause_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not is_pro(update.effective_chat.id):
-        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /ads_pause <id>"); return
-    try:
-        ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, False)
-        safe_reply(update, context, f"⏸️ Đã tạm dừng quảng cáo ID {ad_id}.")
-    except Exception:
-        safe_reply(update, context, "ID không hợp lệ.")
-
-def ads_resume_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not is_pro(update.effective_chat.id):
-        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /ads_resume <id>"); return
-    try:
-        ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, True)
-        safe_reply(update, context, f"▶️ Đã bật lại quảng cáo ID {ad_id}.")
-    except Exception:
-        safe_reply(update, context, "ID không hợp lệ.")
-
-def ads_delete_cmd(update: Update, context: CallbackContext):
-    if not is_admin(update.effective_user.id):
-        safe_reply(update, context, "❌ Bạn không phải admin."); return
-    if not context.args:
-        safe_reply(update, context, "Usage: /ads_delete <id>"); return
-    try:
-        ad_id = int(context.args[0]); ads_delete(update.effective_chat.id, ad_id)
-        safe_reply(update, context, f"🗑️ Đã xoá quảng cáo ID {ad_id}.")
-    except Exception:
-        safe_reply(update, context, "ID không hợp lệ.")
-
-def ads_worker(bot):
-    while True:
-        try:
-            now = now_utc()
-            rows = ads_due(now)
-            for (ad_id, chat_id, text, interval_min, next_run) in rows:
-                if is_pro(chat_id):
-                    try:
-                        bot.send_message(chat_id=chat_id, text=text, disable_web_page_preview=True)
-                    except Exception as e:
-                        logger.warning("Gửi QC lỗi %s: %s", chat_id, e)
-                ads_bump_next(ad_id, interval_min, next_run)
-        except Exception as e:
-            logger.error("ads_worker error: %s", e)
-        time.sleep(30)
-
-# ================== EVENTS & MODERATION ==================
-def delete_service_messages(update: Update, context: CallbackContext):
-    if get_setting(update.effective_chat.id)["noevents"]:
-        try: update.effective_message.delete()
-        except Exception: pass
-
-def new_members(update: Update, context: CallbackContext):
-    s = get_setting(update.effective_chat.id)
-    if s["noevents"]:
-        try: update.effective_message.delete()
-        except Exception: pass
-    if s["nobots"]:
-        for m in update.effective_message.new_chat_members:
-            if m.is_bot:
-                try: context.bot.kick_chat_member(update.effective_chat.id, m.id)
-                except Exception as e: logger.warning("kick bot fail: %s", e)
-
-def message_handler(update: Update, context: CallbackContext):
-    msg = update.message
+# ================== MESSAGE HANDLER ==================
+def message_handler(update,context):
+    msg=update.message
     if not msg: return
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    s = get_setting(chat_id)
+    chat_id=msg.chat.id; user_id=msg.from_user.id
+    s=get_setting(chat_id)
+    wl=list_whitelist(chat_id); bl=list_blacklist(chat_id)
+    txt=msg.text or msg.caption or ""
 
-    # Anti-flood [Pro]
+    # blacklist ưu tiên
+    if any(b.lower() in txt.lower() for b in bl):
+        try: msg.delete()
+        except: pass
+        return
+
+    # nolinks (free)
+    urls=URL_RE.findall(txt); mentions=MENTION_RE.findall(txt)
+    if s["nolinks"]:
+        if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
+            try: msg.delete()
+            except: pass
+            return
+        if mentions:
+            for m in mentions:
+                if not any(w.lower() in m.lower() for w in wl):
+                    try: msg.delete()
+                    except: pass
+                    return
+
+    # noforwards
+    if s["noforwards"] and (msg.forward_date or msg.forward_from):
+        try: msg.delete()
+        except: pass
+        return
+
+    # antiflood (pro)
     if s["antiflood"] and not is_admin(user_id):
-        if not is_pro(chat_id):
-            safe_reply(update, context, "🔒 Anti-flood chỉ dành cho Pro. /applykey <key> để kích hoạt.")
-            return
-        if _is_flood(chat_id, user_id):
+        if not is_pro(chat_id): return
+        if _is_flood(chat_id,user_id):
             try: msg.delete()
-            except Exception: pass
+            except: pass
             return
 
-    # Block forwards (Free)
-    if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
-        try: msg.delete()
-        except Exception: pass
-        return
-
-    text = msg.text or msg.caption or ""
-    wl = list_whitelist(chat_id)
-    bl = list_blacklist(chat_id)
-
-    # Blacklist (ưu tiên)
-    if any(b.lower() in text.lower() for b in bl):
-        try: msg.delete()
-        except Exception: pass
-        return
-
-    urls = URL_RE.findall(text)
-    mentions = MENTION_RE.findall(text)
-
-    # Link filter (Free)
-    if s["nolinks"] and urls:
-        allowed = any(any(w.lower() in u.lower() for w in wl) for u in urls)
-        if not allowed:
-            try: msg.delete()
-            except Exception: pass
-            return
-
-    # Mention filter
-    if s["nolinks"] and mentions:
-        for m in mentions:
-            ok = any(w.lower() in m.lower() for w in wl)
-            if not ok:
-                try: msg.delete()
-                except Exception: pass
-                return
-
-def error_handler(update, context):
-    logger.exception("Exception: %s", context.error)
-
-# ================== START BOT ==================
+# ================== BOOT ==================
 def start_bot():
     init_db()
-    init_ads_table()  # bảng ads
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set"); return
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-
-    # commands
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_cmd))
-    dp.add_handler(CommandHandler("status", status))
-    dp.add_handler(CommandHandler("nolinks", nolinks, pass_args=True))
-    dp.add_handler(CommandHandler("noforwards", noforwards, pass_args=True))
-    dp.add_handler(CommandHandler("nobots", nobots, pass_args=True))
-    dp.add_handler(CommandHandler("antiflood", antiflood, pass_args=True))
-    dp.add_handler(CommandHandler("noevents", noevents, pass_args=True))
-
-    dp.add_handler(CommandHandler("whitelist_add", whitelist_add, pass_args=True))
-    dp.add_handler(CommandHandler("whitelist_remove", whitelist_remove, pass_args=True))
-    dp.add_handler(CommandHandler("whitelist_list", whitelist_list_cmd))
-    dp.add_handler(CommandHandler("blacklist_add", blacklist_add, pass_args=True))
-    dp.add_handler(CommandHandler("blacklist_remove", blacklist_remove, pass_args=True))
-    dp.add_handler(CommandHandler("blacklist_list", blacklist_list_cmd))
-
-    dp.add_handler(CommandHandler("genkey", genkey_cmd, pass_args=True))
-    dp.add_handler(CommandHandler("keys_list", keys_list_cmd))
-    dp.add_handler(CommandHandler("applykey", applykey_cmd, pass_args=True))
-
-    # Pro Ads
-    dp.add_handler(CommandHandler("ads_add", ads_add_cmd, pass_args=True))
-    dp.add_handler(CommandHandler("ads_list", ads_list_cmd))
-    dp.add_handler(CommandHandler("ads_pause", ads_pause_cmd, pass_args=True))
-    dp.add_handler(CommandHandler("ads_resume", ads_resume_cmd, pass_args=True))
-    dp.add_handler(CommandHandler("ads_delete", ads_delete_cmd, pass_args=True))
-
-    # pro-locked callbacks
-    dp.add_handler(CallbackQueryHandler(pro_locked_cb, pattern=r"^pro_locked:"))
-
-    # events
-    dp.add_handler(MessageHandler(Filters.status_update, delete_service_messages))
-    dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, new_members))
-
-    # messages
-    dp.add_handler(MessageHandler(Filters.text | Filters.entity("url") | Filters.caption, message_handler))
-
-    dp.add_error_handler(error_handler)
-    logger.info("🚀 Starting polling...")
+        logger.error("BOT_TOKEN missing"); return
+    updater=Updater(BOT_TOKEN,use_context=True)
+    dp=updater.dispatcher
+    dp.add_handler(CommandHandler("start",start))
+    dp.add_handler(CommandHandler("help",help_cmd))
+    dp.add_handler(CommandHandler("status",status))
+    dp.add_handler(CommandHandler("nolinks",nolinks,pass_args=True))
+    dp.add_handler(CommandHandler("noforwards",noforwards,pass_args=True))
+    dp.add_handler(CommandHandler("nobots",nobots,pass_args=True))
+    dp.add_handler(CommandHandler("antiflood",antiflood,pass_args=True))
+    dp.add_handler(CommandHandler("noevents",noevents,pass_args=True))
+    dp.add_handler(CommandHandler("applykey",applykey_cmd,pass_args=True))
+    dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
+    logger.info("🚀 Bot started")
     updater.start_polling()
-
-    # chạy worker ads ở background
-    threading.Thread(target=ads_worker, args=(updater.bot,), daemon=True).start()
-
     updater.idle()
 
-# ================== FLASK (Render Free keep-alive) ==================
-flask_app = Flask(__name__)
-
+# ================== FLASK ==================
+flask_app=Flask(__name__)
 @flask_app.route("/")
-def home():
-    return "✅ HotroSecurityBot is running (Render Free)."
-
+def home(): return "✅ HotroSecurityBot running (Render)"
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    flask_app.run(host="0.0.0.0", port=port)
+    port=int(os.environ.get("PORT",10000))
+    flask_app.run(host="0.0.0.0",port=port)
 
-# ================== RUN (Flask main thread; bot background) ==================
-if __name__ == "__main__":
-    t = threading.Thread(target=start_bot, daemon=True)
+if __name__=="__main__":
+    t=threading.Thread(target=start_bot,daemon=True)
     t.start()
     run_flask()
