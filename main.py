@@ -203,9 +203,12 @@ def start(update: Update, context: CallbackContext):
     )
 
 def _pro_keyboard_locked():
+    # hai nút trên cùng một hàng cho chuyên nghiệp
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 Kích hoạt Pro", callback_data="pro_locked:apply")],
-        [InlineKeyboardButton("ℹ️ Tính năng gói Pro", callback_data="pro_locked:info")],
+        [
+            InlineKeyboardButton("🔑 Kích hoạt Pro", callback_data="pro_locked:apply"),
+            InlineKeyboardButton("💡 Tính năng Pro", callback_data="pro_locked:info"),
+        ]
     ])
 
 def help_cmd(update: Update, context: CallbackContext):
@@ -253,17 +256,28 @@ def help_cmd(update: Update, context: CallbackContext):
             "• (LOCKED) Ẩn sự kiện nâng cao",
         ]
         update.message.reply_text(
-            "\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_pro_keyboard_locked()
+            "\n".join(core + pro_lines),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_pro_keyboard_locked()
         )
 
 def pro_locked_cb(update: Update, context: CallbackContext):
+    """Sửa: luôn trả lời bằng tin nhắn (không dùng alert) để hoạt động tốt cả private lẫn group."""
     q = update.callback_query
+    data = q.data.split(":", 1)[-1]
+    if data == "apply":
+        q.message.reply_text("🔑 Dùng lệnh `/applykey <key>` để kích hoạt Pro cho nhóm hiện tại.",
+                             parse_mode=ParseMode.MARKDOWN)
+    elif data == "info":
+        q.message.reply_text(
+            "💎 *Gói Pro bao gồm:*\n"
+            "• Tự động quảng cáo định kỳ\n"
+            "• Siết chặt mentions\n"
+            "• Ưu tiên blacklist\n"
+            "• Ẩn sự kiện nâng cao",
+            parse_mode=ParseMode.MARKDOWN
+        )
     q.answer()
-    _, action = q.data.split(":", 1)
-    if action == "apply":
-        q.answer("Dùng /applykey <key> để kích hoạt Pro cho nhóm hiện tại.", show_alert=True)
-    else:
-        q.answer("Pro gồm: siết @mention, ưu tiên blacklist, tự động quảng cáo, ẩn sự kiện nâng cao…", show_alert=True)
 
 def status(update: Update, context: CallbackContext):
     chat = update.effective_chat
@@ -455,7 +469,7 @@ def ads_list_cmd(update: Update, context: CallbackContext):
     lines = ["📣 Danh sách quảng cáo:"]
     for r in rows:
         _id, interval_min, next_run, enabled, preview = r
-        lines.append(f"ID { _id } | {'ON' if enabled else 'OFF'} | mỗi {interval_min}p | {next_run} | \"{preview}\"")
+        lines.append(f"ID {_id} | {'ON' if enabled else 'OFF'} | mỗi {interval_min}p | {next_run} | \"{preview}\"")
     update.message.reply_text("\n".join(lines))
 
 def ads_pause_cmd(update: Update, context: CallbackContext):
