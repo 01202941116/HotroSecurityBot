@@ -1,4 +1,4 @@
-# HotroSecurityBot - Full (Render + PTB 13.15) + Pro LOCKED UI
+# HotroSecurityBot - Full (Render + PTB 13.15) + Pro LOCKED UI + Pro Auto Ads
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
 from datetime import datetime, timedelta
@@ -237,6 +237,7 @@ def help_cmd(update: Update, context: CallbackContext):
         pro_lines = [
             "✨ *Pro (đã kích hoạt)*",
             "• `/applykey <key>` – Gia hạn/áp thêm thời gian",
+            "• Tự động quảng cáo định kỳ: `/ads_add`, `/ads_list`, `/ads_pause`, `/ads_resume`, `/ads_delete`",
             "• Siết chặt mentions (xóa mọi @username không nằm trong whitelist)",
             "• Ưu tiên blacklist (xoá ngay lập tức)",
             "• Ẩn sự kiện nâng cao",
@@ -246,6 +247,7 @@ def help_cmd(update: Update, context: CallbackContext):
         pro_lines = [
             "🔒 *Pro (chưa kích hoạt)*",
             "• (LOCKED) `/applykey <key>` – Kích hoạt Pro cho *nhóm hiện tại*",
+            "• (LOCKED) Tự động quảng cáo định kỳ",
             "• (LOCKED) Siết chặt mentions",
             "• (LOCKED) Ưu tiên blacklist",
             "• (LOCKED) Ẩn sự kiện nâng cao",
@@ -261,7 +263,7 @@ def pro_locked_cb(update: Update, context: CallbackContext):
     if action == "apply":
         q.answer("Dùng /applykey <key> để kích hoạt Pro cho nhóm hiện tại.", show_alert=True)
     else:
-        q.answer("Pro gồm: siết @mention, ưu tiên blacklist, ẩn sự kiện nâng cao…", show_alert=True)
+        q.answer("Pro gồm: siết @mention, ưu tiên blacklist, tự động quảng cáo, ẩn sự kiện nâng cao…", show_alert=True)
 
 def status(update: Update, context: CallbackContext):
     chat = update.effective_chat
@@ -375,6 +377,138 @@ def applykey_cmd(update: Update, context: CallbackContext):
     set_pro_until(chat.id, new_until)
     update.message.reply_text(f"✅ Đã kích hoạt Pro đến: {new_until.strftime('%d/%m/%Y %H:%M UTC')}")
 
+# ================== ADS (Pro Feature - Auto Ads Scheduler) ==================
+def init_ads_table():
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS ad_campaigns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER,
+        text TEXT,
+        interval_min INTEGER,
+        next_run TEXT,
+        enabled INTEGER DEFAULT 1,
+        created_by INTEGER,
+        created_at TEXT
+    )""")
+    conn.commit(); conn.close()
+
+def ads_add(chat_id: int, text: str, interval_min: int, start_time: datetime, created_by: int):
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("""INSERT INTO ad_campaigns(chat_id, text, interval_min, next_run, enabled, created_by, created_at)
+                   VALUES(?,?,?,?,1,?,?)""",
+                (chat_id, text, interval_min, start_time.isoformat(), created_by, now_utc().isoformat()))
+    conn.commit(); conn.close()
+
+def ads_list(chat_id: int):
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("""SELECT id, interval_min, next_run, enabled, substr(text,1,80)
+                   FROM ad_campaigns WHERE chat_id=? ORDER BY id""", (chat_id,))
+    rows = cur.fetchall(); conn.close(); return rows
+
+def ads_toggle(chat_id: int, ad_id: int, on: bool):
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("UPDATE ad_campaigns SET enabled=? WHERE chat_id=? AND id=?", (1 if on else 0, chat_id, ad_id))
+    conn.commit(); conn.close()
+
+def ads_delete(chat_id: int, ad_id: int):
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("DELETE FROM ad_campaigns WHERE chat_id=? AND id=?", (chat_id, ad_id))
+    conn.commit(); conn.close()
+
+def ads_due(now: datetime):
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("""SELECT id, chat_id, text, interval_min, next_run
+                   FROM ad_campaigns WHERE enabled=1 AND next_run<=?""", (now.isoformat(),))
+    rows = cur.fetchall(); conn.close(); return rows
+
+def ads_bump_next(ad_id: int, minutes: int, last_next_run: str):
+    base = datetime.fromisoformat(last_next_run)
+    new_next = base + timedelta(minutes=minutes)
+    conn = _conn(); cur = conn.cursor()
+    cur.execute("UPDATE ad_campaigns SET next_run=? WHERE id=?", (new_next.isoformat(), ad_id))
+    conn.commit(); conn.close()
+
+def ads_add_cmd(update: Update, context: CallbackContext):
+    if not is_admin(update.effective_user.id):
+        update.message.reply_text("❌ Bạn không phải admin."); return
+    if not require_pro(update, "ads_add"): return
+    if len(context.args) < 2:
+        update.message.reply_text("Usage: /ads_add <phut> <noi_dung>"); return
+    try:
+        minutes = int(context.args[0])
+        if minutes < 5:
+            update.message.reply_text("Khoảng lặp tối thiểu là 5 phút."); return
+    except Exception:
+        update.message.reply_text("Số phút không hợp lệ."); return
+    text = " ".join(context.args[1:]).strip()
+    if not text:
+        update.message.reply_text("Nội dung quảng cáo trống."); return
+    ads_add(update.effective_chat.id, text, minutes, now_utc(), update.effective_user.id)
+    update.message.reply_text(f"✅ Đã tạo quảng cáo tự động, lặp mỗi {minutes} phút.")
+
+def ads_list_cmd(update: Update, context: CallbackContext):
+    if not is_admin(update.effective_user.id):
+        update.message.reply_text("❌ Bạn không phải admin."); return
+    rows = ads_list(update.effective_chat.id)
+    if not rows:
+        update.message.reply_text("Chưa có quảng cáo nào."); return
+    lines = ["📣 Danh sách quảng cáo:"]
+    for r in rows:
+        _id, interval_min, next_run, enabled, preview = r
+        lines.append(f"ID { _id } | {'ON' if enabled else 'OFF'} | mỗi {interval_min}p | {next_run} | \"{preview}\"")
+    update.message.reply_text("\n".join(lines))
+
+def ads_pause_cmd(update: Update, context: CallbackContext):
+    if not is_admin(update.effective_user.id):
+        update.message.reply_text("❌ Bạn không phải admin."); return
+    if not require_pro(update, "ads_pause"): return
+    if not context.args:
+        update.message.reply_text("Usage: /ads_pause <id>"); return
+    try:
+        ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, False)
+        update.message.reply_text(f"⏸️ Đã tạm dừng quảng cáo ID {ad_id}.")
+    except Exception:
+        update.message.reply_text("ID không hợp lệ.")
+
+def ads_resume_cmd(update: Update, context: CallbackContext):
+    if not is_admin(update.effective_user.id):
+        update.message.reply_text("❌ Bạn không phải admin."); return
+    if not require_pro(update, "ads_resume"): return
+    if not context.args:
+        update.message.reply_text("Usage: /ads_resume <id>"); return
+    try:
+        ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, True)
+        update.message.reply_text(f"▶️ Đã bật lại quảng cáo ID {ad_id}.")
+    except Exception:
+        update.message.reply_text("ID không hợp lệ.")
+
+def ads_delete_cmd(update: Update, context: CallbackContext):
+    if not is_admin(update.effective_user.id):
+        update.message.reply_text("❌ Bạn không phải admin."); return
+    if not context.args:
+        update.message.reply_text("Usage: /ads_delete <id>"); return
+    try:
+        ad_id = int(context.args[0]); ads_delete(update.effective_chat.id, ad_id)
+        update.message.reply_text(f"🗑️ Đã xoá quảng cáo ID {ad_id}.")
+    except Exception:
+        update.message.reply_text("ID không hợp lệ.")
+
+def ads_worker(bot):
+    while True:
+        try:
+            now = now_utc()
+            rows = ads_due(now)
+            for (ad_id, chat_id, text, interval_min, next_run) in rows:
+                if is_pro(chat_id):
+                    try:
+                        bot.send_message(chat_id=chat_id, text=text, disable_web_page_preview=True)
+                    except Exception as e:
+                        logger.warning("Gửi QC lỗi %s: %s", chat_id, e)
+                ads_bump_next(ad_id, interval_min, next_run)
+        except Exception as e:
+            logger.error("ads_worker error: %s", e)
+        time.sleep(30)
+
 # ================== EVENTS & MODERATION ==================
 def delete_service_messages(update: Update, context: CallbackContext):
     if get_setting(update.effective_chat.id)["noevents"]:
@@ -450,6 +584,7 @@ def error_handler(update, context):
 # ================== START BOT ==================
 def start_bot():
     init_db()
+    init_ads_table()  # bảng ads
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set"); return
     updater = Updater(BOT_TOKEN, use_context=True)
@@ -476,6 +611,13 @@ def start_bot():
     dp.add_handler(CommandHandler("keys_list", keys_list_cmd))
     dp.add_handler(CommandHandler("applykey", applykey_cmd, pass_args=True))
 
+    # Pro Ads
+    dp.add_handler(CommandHandler("ads_add", ads_add_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("ads_list", ads_list_cmd))
+    dp.add_handler(CommandHandler("ads_pause", ads_pause_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("ads_resume", ads_resume_cmd, pass_args=True))
+    dp.add_handler(CommandHandler("ads_delete", ads_delete_cmd, pass_args=True))
+
     # pro-locked callbacks
     dp.add_handler(CallbackQueryHandler(pro_locked_cb, pattern=r"^pro_locked:"))
 
@@ -489,6 +631,10 @@ def start_bot():
     dp.add_error_handler(error_handler)
     logger.info("🚀 Starting polling...")
     updater.start_polling()
+
+    # chạy worker ads ở background
+    threading.Thread(target=ads_worker, args=(updater.bot,), daemon=True).start()
+
     updater.idle()
 
 # ================== FLASK (Render Free keep-alive) ==================
