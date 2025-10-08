@@ -535,8 +535,13 @@ def start_bot():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN missing"); return
 
-    updater=Updater(BOT_TOKEN, use_context=True)
-    dp=updater.dispatcher
+    updater = Updater(BOT_TOKEN, use_context=True)
+
+    # ✨ Thêm đoạn sau để chắc chắn không còn webhook & xoá backlog
+    try:
+        updater.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning("delete_webhook failed: %s", e)
 
     # core
     dp.add_handler(CommandHandler("start",start))
