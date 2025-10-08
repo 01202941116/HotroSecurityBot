@@ -226,49 +226,74 @@ def chatid_cmd(update: Update, context: CallbackContext):
     cid = update.effective_chat.id if update.effective_chat else None
     safe_reply_private(update, context, f"💬 This chat_id: `{cid}`", parse_mode=ParseMode.MARKDOWN)
 
+# ---------- HƯỚNG DẪN (đã viết lại rõ ràng) ----------
 def _help_text_free():
-    return """🛡 *HƯỚNG DẪN SỬ DỤNG CƠ BẢN*
+    return """🛡 *HƯỚNG DẪN SỬ DỤNG – GÓI CƠ BẢN*
 
-📌 *Quản lý nhóm*
+👣 *Bắt đầu nhanh*
+1) Thêm bot vào nhóm và cấp quyền *Delete messages*.
+2) Admin (ID trong biến `ADMIN_IDS`) dùng lệnh dưới để bật/tắt.
+3) Nếu muốn nhận hướng dẫn riêng, mở chat riêng với bot rồi gửi */start*.
+
+📌 *Quản lý nhóm (miễn phí)*
 /status – Xem cấu hình & thời hạn Pro
-/nolinks on|off – Chặn link & @mention
-/noforwards on|off – Chặn tin forward
-/nobots on|off – Cấm mời bot vào nhóm
+/nolinks on|off – Chặn link & @mention (trừ whitelist)
+/noforwards on|off – Chặn tin nhắn forward
+/nobots on|off – Cấm mời bot khác vào nhóm
 
 📜 *Danh sách*
-/whitelist_add <text> /whitelist_remove <text>
-/blacklist_add <text> /blacklist_remove <text>
-/whitelist_list /blacklist_list
+/whitelist_add <text> – Thêm từ/miền được phép
+/whitelist_remove <text> – Xoá whitelist
+/whitelist_list – Xem whitelist
+/blacklist_add <text> – Thêm từ cấm
+/blacklist_remove <text> – Xoá blacklist
+/blacklist_list – Xem blacklist
 
-🧪 *Dùng thử Pro 7 ngày (admin)* 
-/trial7 – Kích hoạt dùng thử cho *nhóm hiện tại*
+🧪 *Dùng thử Pro 7 ngày (admin)*
+/trial7 – Kích hoạt dùng thử cho *nhóm hiện tại* (mỗi nhóm 1 lần).  
+Khi hết hạn, bot sẽ tự nhắc và tính năng Pro sẽ tắt.
 
-🔑 *Nâng cấp vĩnh viễn*
-/applykey <key> – Kích hoạt Pro
-/genkey <tháng> – (Admin) tạo key dùng thử
+🔑 *Nâng cấp Pro*
+/applykey <key> – Kích hoạt Pro bằng key
+/genkey <tháng> – (Admin) tạo key thử nghiệm
+/keys_list – (Admin) xem danh sách key
+
+🛠 *Tiện ích*
+/myid – Xem user_id của bạn
+/chatid – Xem chat_id của nhóm
+
+💬 Hỗ trợ: @Myyduyenng
 """.strip()
 
 def _help_text_pro():
-    return """💎 *HOTRO SECURITY PRO – ĐÃ KÍCH HOẠT*
+    return """💎 *HƯỚNG DẪN SỬ DỤNG – GÓI PRO (ĐÃ KÍCH HOẠT)*
 
-⚙️ *Cơ bản*
-/status – Xem cấu hình nhóm
-/nolinks on|off – Chặn link & mentions
+🚀 *Tăng cường bảo vệ*
+/antiflood on|off – Chống spam (>3 tin/20s, bỏ qua admin bot)
+/noevents on|off – Ẩn thông báo join/leave
+
+🔧 *Cơ bản (giống gói Free)*
+/status – Xem cấu hình & hạn Pro
+/nolinks on|off – Chặn link & @mention (trừ whitelist)
 /noforwards on|off – Chặn forward
 /nobots on|off – Cấm bot vào nhóm
-/noevents on|off – Ẩn join/leave
-/antiflood on|off – Chống spam (3 tin / 20s)
 
 📜 *Danh sách*
-/whitelist_add <text> /whitelist_remove <text>
-/blacklist_add <text> /blacklist_remove <text>
-/whitelist_list /blacklist_list
+/whitelist_add <text>, /whitelist_remove <text>, /whitelist_list
+/blacklist_add <text>, /blacklist_remove <text>, /blacklist_list
 
 🔑 *Key*
 /applykey <key> – Gia hạn/kích hoạt
 /genkey <tháng> – (Admin) tạo key
 /keys_list – (Admin) xem danh sách key
+
+🛠 *Tiện ích*
+/myid – User ID
+/chatid – Chat ID
+
+ℹ️ Khi Pro hết hạn (thử/keys), bot sẽ nhắc – nhóm tự động trở về chế độ Free.
 """.strip()
+# ----------------------------------------------------
 
 def help_cmd(update: Update, context: CallbackContext):
     chat = update.effective_chat
@@ -404,7 +429,6 @@ def trial7_cmd(update: Update, context: CallbackContext):
 # ----- SCHEDULER: kiểm tra hết hạn Pro mỗi 30 phút -----
 def pro_expiry_check(context: CallbackContext):
     try:
-        # Duyệt tất cả chat có cấu hình
         conn=_conn();cur=conn.cursor()
         cur.execute("SELECT chat_id, pro_until, last_pro_notice FROM chat_settings")
         rows = cur.fetchall(); conn.close()
@@ -413,19 +437,15 @@ def pro_expiry_check(context: CallbackContext):
                 continue
             pro_dt = datetime.fromisoformat(pro_until)
             if pro_dt > now_utc():
-                # reset last notice nếu còn hạn
                 if last_notice:
                     set_last_pro_notice(chat_id, None)
                 continue
-            # Pro hết hạn -> set None & thông báo 1 lần
             if not last_notice:
-                set_pro_until(chat_id, now_utc() - timedelta(seconds=1))  # đảm bảo is_pro False
+                set_pro_until(chat_id, now_utc() - timedelta(seconds=1))
                 set_last_pro_notice(chat_id, now_utc())
-                # DM admin (nếu có), fallback group
                 msg = ("⛔ Gói Pro của nhóm đã *hết hạn dùng thử/keys*.\n"
                        "Vui lòng liên hệ admin để gia hạn hoặc dùng /applykey <key>.")
                 try:
-                    # gửi vào nhóm (tối thiểu) vì có thể không biết admin nào đã /start
                     context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
                 except Exception as e:
                     logger.warning("Notify expiry failed for %s: %s", chat_id, e)
@@ -441,21 +461,17 @@ def message_handler(update,context):
     wl=list_whitelist(chat_id); bl=list_blacklist(chat_id)
     txt=msg.text or msg.caption or ""
 
-    # ----- Admin bypass -----
+    # Admin bypass
     if is_admin(user_id):
-        # Nếu muốn blacklist vẫn áp cho admin, bỏ comment 3 dòng dưới:
-        # if any(b.lower() in txt.lower() for b in bl):
-        #     try: msg.delete()
-        #     except: pass
         return
 
-    # ----- Blacklist ưu tiên -----
+    # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
         try: msg.delete()
         except: pass
         return
 
-    # ----- Link & mentions (Free) -----
+    # Link & mentions (Free)
     urls=URL_RE.findall(txt); mentions=MENTION_RE.findall(txt)
     if s["nolinks"]:
         if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
@@ -469,13 +485,13 @@ def message_handler(update,context):
                     except: pass
                     return
 
-    # ----- Forwards (Free) -----
+    # Forwards (Free)
     if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
         try: msg.delete()
         except: pass
         return
 
-    # ----- Anti-flood (Pro) -----
+    # Anti-flood (Pro)
     if s["antiflood"]:
         if not is_pro(chat_id): 
             return
@@ -545,7 +561,6 @@ def home():
 
 def run_flask():
     port=int(os.environ.get("PORT",10000))
-    # Debug off vì Render log đã có
     flask_app.run(host="0.0.0.0",port=port)
 
 # ================== RUN ==================
