@@ -67,6 +67,20 @@ def is_admin(user_id: int) -> bool:
 def now_utc():
     return datetime.utcnow()
 
+def safe_reply(update: Update, context: CallbackContext, text: str, **kwargs):
+    """
+    Gửi trả lời an toàn: nếu tin gốc không tồn tại (đã bị xoá) thì gửi như tin mới.
+    Khắc phục lỗi telegram.error.BadRequest: Message to be replied not found
+    """
+    try:
+        if update.effective_message:
+            return update.effective_message.reply_text(text, **kwargs)
+    except Exception as e:
+        try:
+            return context.bot.send_message(chat_id=update.effective_chat.id, text=text, **kwargs)
+        except Exception as e2:
+            logger.warning("safe_reply failed: %s / fallback: %s", e, e2)
+
 def get_setting(chat_id: int):
     conn = _conn(); cur = conn.cursor()
     cur.execute("""SELECT nolinks, noforwards, nobots, antiflood, noevents, pro_until
@@ -95,9 +109,10 @@ def require_pro(update: Update, feature_name: str) -> bool:
     chat_id = update.effective_chat.id
     if is_pro(chat_id):
         return True
-    update.message.reply_text(
-        f"🔒 Tính năng *{feature_name}* chỉ dành cho gói *Pro*.\n"
-        f"Vui lòng dùng `/applykey <key>` để kích hoạt Pro cho nhóm.",
+    safe_reply(
+        update, context=CallbackContext.from_update(update, None),
+        text=f"🔒 Tính năng *{feature_name}* chỉ dành cho gói *Pro*.\n"
+             f"Vui lòng dùng `/applykey <key>` để kích hoạt Pro cho nhóm.",
         parse_mode=ParseMode.MARKDOWN
     )
     return False
@@ -197,7 +212,7 @@ def _is_flood(chat_id, user_id):
 
 # ================== COMMANDS ==================
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
+    safe_reply(update, context,
         "🤖 HotroSecurityBot đang hoạt động!\n"
         "Dùng /status để xem cấu hình hoặc /help để biết thêm lệnh."
     )
@@ -245,7 +260,7 @@ def help_cmd(update: Update, context: CallbackContext):
             "• Ưu tiên blacklist (xoá ngay lập tức)",
             "• Ẩn sự kiện nâng cao",
         ]
-        update.message.reply_text("\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN)
+        safe_reply(update, context, "\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN)
     else:
         pro_lines = [
             "🔒 *Pro (chưa kích hoạt)*",
@@ -255,14 +270,13 @@ def help_cmd(update: Update, context: CallbackContext):
             "• (LOCKED) Ưu tiên blacklist",
             "• (LOCKED) Ẩn sự kiện nâng cao",
         ]
-        update.message.reply_text(
-            "\n".join(core + pro_lines),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_pro_keyboard_locked()
+        safe_reply(
+            update, context, "\n".join(core + pro_lines),
+            parse_mode=ParseMode.MARKDOWN, reply_markup=_pro_keyboard_locked()
         )
 
 def pro_locked_cb(update: Update, context: CallbackContext):
-    """Sửa: luôn trả lời bằng tin nhắn (không dùng alert) để hoạt động tốt cả private lẫn group."""
+    """Callback nút khóa Pro."""
     q = update.callback_query
     data = q.data.split(":", 1)[-1]
     if data == "apply":
@@ -291,19 +305,22 @@ def status(update: Update, context: CallbackContext):
             f"- {pro_txt}\n"
             f"- Whitelist: {', '.join(wl) if wl else '(none)'}\n"
             f"- Blacklist: {', '.join(bl) if bl else '(none)'}")
-    update.message.reply_text(text)
+    safe_reply(update, context, text)
 
 # toggles (một số là Pro)
 def _toggle(update: Update, context: CallbackContext, field: str, pro_only: bool = False):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if pro_only and not require_pro(update, field):
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if pro_only and not is_pro(update.effective_chat.id):
+        safe_reply(update, context,
+                   f"🔒 Tính năng *{field}* chỉ dành cho gói *Pro*.\nDùng `/applykey <key>` để kích hoạt.",
+                   parse_mode=ParseMode.MARKDOWN)
         return
     if not context.args or context.args[0].lower() not in ("on","off"):
-        update.message.reply_text(f"Usage: /{field} on|off"); return
+        safe_reply(update, context, f"Usage: /{field} on|off"); return
     val = 1 if context.args[0].lower()=="on" else 0
     set_setting(update.effective_chat.id, field, val)
-    update.message.reply_text(f"✅ {field} = {'on' if val else 'off'}")
+    safe_reply(update, context, f"✅ {field} = {'on' if val else 'off'}")
 
 def nolinks(update, context):    _toggle(update, context, "nolinks", pro_only=False)
 def noforwards(update, context): _toggle(update, context, "noforwards", pro_only=False)
@@ -314,73 +331,81 @@ def noevents(update, context):   _toggle(update, context, "noevents", pro_only=T
 # whitelist / blacklist
 def whitelist_add(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not context.args: update.message.reply_text("Usage: /whitelist_add <từ|domain>"); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply(update, context, "Usage: /whitelist_add <từ|domain>"); return
     add_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("✅ Đã thêm vào whitelist.")
+    safe_reply(update, context, "✅ Đã thêm vào whitelist.")
 
 def whitelist_remove(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not context.args: update.message.reply_text("Usage: /whitelist_remove <từ|domain>"); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply(update, context, "Usage: /whitelist_remove <từ|domain>"); return
     remove_whitelist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("✅ Đã xóa khỏi whitelist.")
+    safe_reply(update, context, "✅ Đã xóa khỏi whitelist.")
 
 def whitelist_list_cmd(update: Update, context: CallbackContext):
     wl = list_whitelist(update.effective_chat.id)
-    update.message.reply_text("Whitelist:\n" + ("\n".join(wl) if wl else "(none)"))
+    safe_reply(update, context, "Whitelist:\n" + ("\n".join(wl) if wl else "(none)"))
 
 def blacklist_add(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not context.args: update.message.reply_text("Usage: /blacklist_add <từ|domain>"); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply(update, context, "Usage: /blacklist_add <từ|domain>"); return
     add_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("✅ Đã thêm vào blacklist.")
+    safe_reply(update, context, "✅ Đã thêm vào blacklist.")
 
 def blacklist_remove(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not context.args: update.message.reply_text("Usage: /blacklist_remove <từ|domain>"); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not context.args:
+        safe_reply(update, context, "Usage: /blacklist_remove <từ|domain>"); return
     remove_blacklist(update.effective_chat.id, ' '.join(context.args).strip())
-    update.message.reply_text("✅ Đã xóa khỏi blacklist.")
+    safe_reply(update, context, "✅ Đã xóa khỏi blacklist.")
 
 def blacklist_list_cmd(update: Update, context: CallbackContext):
     bl = list_blacklist(update.effective_chat.id)
-    update.message.reply_text("Blacklist:\n" + ("\n".join(bl) if bl else "(none)"))
+    safe_reply(update, context, "Blacklist:\n" + ("\n".join(bl) if bl else "(none)"))
 
 # keys
 def genkey_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
     months = 1
     if context.args:
         try: months = int(context.args[0])
-        except Exception: update.message.reply_text("Usage: /genkey <tháng>"); return
+        except Exception:
+            safe_reply(update, context, "Usage: /genkey <tháng>"); return
     key, expires = gen_key(months)
-    update.message.reply_text(
+    safe_reply(
+        update, context,
         f"🔑 Key mới: `{key}`\nHiệu lực {months} tháng, hết hạn {expires.isoformat()} (UTC)",
         parse_mode=ParseMode.MARKDOWN
     )
 
 def keys_list_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
     rows = list_keys()
-    if not rows: update.message.reply_text("Chưa có key nào."); return
+    if not rows:
+        safe_reply(update, context, "Chưa có key nào."); return
     text = "🗝 Danh sách key:\n" + "\n".join(
         f"{r[0]} | {r[1]} tháng | tạo:{r[2]} | hết hạn:{r[3]} | used_by:{r[4]}" for r in rows
     )
-    update.message.reply_text(text)
+    safe_reply(update, context, text)
 
 def applykey_cmd(update: Update, context: CallbackContext):
     chat = update.effective_chat
     user = update.effective_user
     if not context.args:
-        update.message.reply_text("Usage: /applykey <key>\n(Key sẽ kích hoạt Pro cho *nhóm hiện tại*)",
-                                  parse_mode=ParseMode.MARKDOWN); return
+        safe_reply(update, context,
+                   "Usage: /applykey <key>\n(Key sẽ kích hoạt Pro cho *nhóm hiện tại*)",
+                   parse_mode=ParseMode.MARKDOWN); return
     ok, reason, months = consume_key(context.args[0].strip(), user.id)
     if not ok:
-        update.message.reply_text({
+        safe_reply(update, context, {
             "invalid":"❌ Key không hợp lệ",
             "used":"❌ Key đã được sử dụng",
             "expired":"❌ Key đã hết hạn"
@@ -389,7 +414,7 @@ def applykey_cmd(update: Update, context: CallbackContext):
     base = s["pro_until"] if s["pro_until"] and s["pro_until"] > now_utc() else now_utc()
     new_until = base + timedelta(days=30*months)
     set_pro_until(chat.id, new_until)
-    update.message.reply_text(f"✅ Đã kích hoạt Pro đến: {new_until.strftime('%d/%m/%Y %H:%M UTC')}")
+    safe_reply(update, context, f"✅ Đã kích hoạt Pro đến: {new_until.strftime('%d/%m/%Y %H:%M UTC')}")
 
 # ================== ADS (Pro Feature - Auto Ads Scheduler) ==================
 def init_ads_table():
@@ -444,68 +469,71 @@ def ads_bump_next(ad_id: int, minutes: int, last_next_run: str):
 
 def ads_add_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not require_pro(update, "ads_add"): return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not is_pro(update.effective_chat.id):
+        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
     if len(context.args) < 2:
-        update.message.reply_text("Usage: /ads_add <phut> <noi_dung>"); return
+        safe_reply(update, context, "Usage: /ads_add <phut> <noi_dung>"); return
     try:
         minutes = int(context.args[0])
         if minutes < 5:
-            update.message.reply_text("Khoảng lặp tối thiểu là 5 phút."); return
+            safe_reply(update, context, "Khoảng lặp tối thiểu là 5 phút."); return
     except Exception:
-        update.message.reply_text("Số phút không hợp lệ."); return
+        safe_reply(update, context, "Số phút không hợp lệ."); return
     text = " ".join(context.args[1:]).strip()
     if not text:
-        update.message.reply_text("Nội dung quảng cáo trống."); return
+        safe_reply(update, context, "Nội dung quảng cáo trống."); return
     ads_add(update.effective_chat.id, text, minutes, now_utc(), update.effective_user.id)
-    update.message.reply_text(f"✅ Đã tạo quảng cáo tự động, lặp mỗi {minutes} phút.")
+    safe_reply(update, context, f"✅ Đã tạo quảng cáo tự động, lặp mỗi {minutes} phút.")
 
 def ads_list_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
     rows = ads_list(update.effective_chat.id)
     if not rows:
-        update.message.reply_text("Chưa có quảng cáo nào."); return
+        safe_reply(update, context, "Chưa có quảng cáo nào."); return
     lines = ["📣 Danh sách quảng cáo:"]
     for r in rows:
         _id, interval_min, next_run, enabled, preview = r
         lines.append(f"ID {_id} | {'ON' if enabled else 'OFF'} | mỗi {interval_min}p | {next_run} | \"{preview}\"")
-    update.message.reply_text("\n".join(lines))
+    safe_reply(update, context, "\n".join(lines))
 
 def ads_pause_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not require_pro(update, "ads_pause"): return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not is_pro(update.effective_chat.id):
+        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
     if not context.args:
-        update.message.reply_text("Usage: /ads_pause <id>"); return
+        safe_reply(update, context, "Usage: /ads_pause <id>"); return
     try:
         ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, False)
-        update.message.reply_text(f"⏸️ Đã tạm dừng quảng cáo ID {ad_id}.")
+        safe_reply(update, context, f"⏸️ Đã tạm dừng quảng cáo ID {ad_id}.")
     except Exception:
-        update.message.reply_text("ID không hợp lệ.")
+        safe_reply(update, context, "ID không hợp lệ.")
 
 def ads_resume_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
-    if not require_pro(update, "ads_resume"): return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
+    if not is_pro(update.effective_chat.id):
+        safe_reply(update, context, "🔒 Tính năng chỉ dành cho Pro. Dùng /applykey <key> để kích hoạt."); return
     if not context.args:
-        update.message.reply_text("Usage: /ads_resume <id>"); return
+        safe_reply(update, context, "Usage: /ads_resume <id>"); return
     try:
         ad_id = int(context.args[0]); ads_toggle(update.effective_chat.id, ad_id, True)
-        update.message.reply_text(f"▶️ Đã bật lại quảng cáo ID {ad_id}.")
+        safe_reply(update, context, f"▶️ Đã bật lại quảng cáo ID {ad_id}.")
     except Exception:
-        update.message.reply_text("ID không hợp lệ.")
+        safe_reply(update, context, "ID không hợp lệ.")
 
 def ads_delete_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Bạn không phải admin."); return
+        safe_reply(update, context, "❌ Bạn không phải admin."); return
     if not context.args:
-        update.message.reply_text("Usage: /ads_delete <id>"); return
+        safe_reply(update, context, "Usage: /ads_delete <id>"); return
     try:
         ad_id = int(context.args[0]); ads_delete(update.effective_chat.id, ad_id)
-        update.message.reply_text(f"🗑️ Đã xoá quảng cáo ID {ad_id}.")
+        safe_reply(update, context, f"🗑️ Đã xoá quảng cáo ID {ad_id}.")
     except Exception:
-        update.message.reply_text("ID không hợp lệ.")
+        safe_reply(update, context, "ID không hợp lệ.")
 
 def ads_worker(bot):
     while True:
@@ -549,7 +577,8 @@ def message_handler(update: Update, context: CallbackContext):
 
     # Anti-flood [Pro]
     if s["antiflood"] and not is_admin(user_id):
-        if not is_pro(chat_id) and not require_pro(update, "antiflood"):
+        if not is_pro(chat_id):
+            safe_reply(update, context, "🔒 Anti-flood chỉ dành cho Pro. /applykey <key> để kích hoạt.")
             return
         if _is_flood(chat_id, user_id):
             try: msg.delete()
@@ -583,7 +612,7 @@ def message_handler(update: Update, context: CallbackContext):
             except Exception: pass
             return
 
-    # Mention filter (siết chặt hơn nếu Pro cũng đã bao phủ ở whitelist)
+    # Mention filter
     if s["nolinks"] and mentions:
         for m in mentions:
             ok = any(w.lower() in m.lower() for w in wl)
