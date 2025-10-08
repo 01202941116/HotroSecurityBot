@@ -13,7 +13,7 @@ from telegram import Update, ParseMode
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 )
-from telegram.error import Forbidden
+from telegram.error import Unauthorized, TelegramError
 
 # ================== ENV ==================
 load_dotenv()
@@ -63,18 +63,17 @@ def now_utc():
 
 def notify_admin(update: Update, context: CallbackContext, text: str, ttl_sec: int = 8, **kwargs):
     """
-    Cố gửi DM cho người gọi lệnh; nếu Forbidden (chưa /start hoặc blocked),
+    Cố gửi DM cho người gọi lệnh; nếu lỗi (Unauthorized/blocked/no-start),
     gửi tin 'tạm' trong nhóm và tự xoá sau ttl_sec.
     """
     try:
-        # Không cố gắng DM đến bot (tránh Forbidden vô nghĩa)
         if update.effective_user and not update.effective_user.is_bot:
             context.bot.send_message(chat_id=update.effective_user.id, text=text, **kwargs)
             return
-    except Forbidden:
-        pass
+    except (Unauthorized, TelegramError) as e:
+        logger.info("DM failed (%s): %s", type(e).__name__, e)
     except Exception as e:
-        logger.warning("DM fail: %s", e)
+        logger.warning("DM unexpected fail: %s", e)
 
     # Fallback: gửi trong nhóm rồi tự xoá
     try:
@@ -161,7 +160,7 @@ def gen_key(months=1):
     expires = created + timedelta(days=30*int(months))
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO pro_keys(key,months,created_at,expires_at) VALUES(?,?,?,?)",
-                (key,months,created.isoformat(),expires.isoformat()))
+        (key,months,created.isoformat(),expires.isoformat()))
     conn.commit();conn.close()
     return key,expires
 
@@ -243,7 +242,6 @@ def _help_text_pro():
 def help_cmd(update,context):
     chat = update.effective_chat
     user_id = update.effective_user.id
-    # chỉ cho admin xem help chi tiết (và gửi qua DM / fallback)
     if chat.type in ("group","supergroup") and not is_admin(user_id):
         return
     pro = is_pro(chat.id)
