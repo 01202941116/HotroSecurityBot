@@ -4,6 +4,7 @@
 # - Admin bypass for filters
 # - Auto Pro expiry notice (DM admin; fallback announce)
 # - Flask keep-alive + polling in background
+# - FIX: Delete webhook trước khi polling để tránh Conflict
 
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
@@ -62,7 +63,6 @@ def init_db():
         key TEXT PRIMARY KEY, months INTEGER, created_at TEXT,
         used_by INTEGER NULL, expires_at TEXT NULL
     )""")
-    # ensure new columns when deploy upgrade
     _ensure_col(cur, "trial_used", "INTEGER DEFAULT 0")
     _ensure_col(cur, "last_pro_notice", "TEXT NULL")
     conn.commit(); conn.close()
@@ -75,10 +75,7 @@ def now_utc():
     return datetime.utcnow()
 
 def safe_reply_private(update: Update, context: CallbackContext, text: str, **kwargs):
-    """
-    Ưu tiên gửi DM cho người gọi lệnh (admin).
-    Nếu Telegram cấm (user chưa /start bot ở DM), fallback trả lời tối thiểu trong group.
-    """
+    """Ưu tiên DM; nếu bị Forbidden (user chưa /start), fallback nhắn tối thiểu ở group."""
     user_id = update.effective_user.id if update and update.effective_user else None
     chat_id = update.effective_chat.id if update and update.effective_chat else None
     try:
@@ -86,16 +83,13 @@ def safe_reply_private(update: Update, context: CallbackContext, text: str, **kw
             context.bot.send_message(chat_id=user_id, text=text, **kwargs)
             return
     except Exception as e:
-        # Forbidden: bot can't initiate conversation with a user
         logger.warning("safe_reply_private: DM failed -> %s", e)
-
-    # fallback gửi trong group (nếu có), nhắc user /start bot ở DM
     try:
         if chat_id:
             context.bot.send_message(
                 chat_id=chat_id,
-                text="(🔔 Chỉ báo cho admin) " + text + "\n\nℹ️ Nếu muốn nhận tin riêng, hãy mở DM với bot và gửi /start.",
-                **{k:v for k,v in kwargs.items() if k != "reply_markup"}  # tránh inline markup rò rỉ
+                text="(🔔 Chỉ báo cho admin) " + text + "\n\nℹ️ Muốn nhận tin riêng, hãy mở DM với bot và gửi /start.",
+                **{k:v for k,v in kwargs.items() if k != "reply_markup"}
             )
     except Exception as e2:
         logger.warning("safe_reply_private: group fallback failed -> %s", e2)
@@ -139,7 +133,7 @@ def is_pro(chat_id: int) -> bool:
     s = get_setting(chat_id)
     return bool(s["pro_until"] and s["pro_until"] > now_utc())
 
-# whitelist/blacklist ops
+# ===== whitelist / blacklist =====
 def add_whitelist(chat_id, text):
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text.strip()))
@@ -170,7 +164,7 @@ def list_blacklist(chat_id):
     cur.execute("SELECT text FROM blacklist WHERE chat_id=?",(chat_id,))
     r=[x[0] for x in cur.fetchall()];conn.close();return r
 
-# Pro keys (tuỳ chọn, vẫn giữ)
+# ===== Pro keys =====
 def gen_key(months=1):
     key = secrets.token_urlsafe(12)
     created = now_utc()
@@ -226,53 +220,16 @@ def chatid_cmd(update: Update, context: CallbackContext):
     cid = update.effective_chat.id if update.effective_chat else None
     safe_reply_private(update, context, f"💬 This chat_id: `{cid}`", parse_mode=ParseMode.MARKDOWN)
 
-# ---------- HƯỚNG DẪN (đã viết lại rõ ràng) ----------
+# ---------- HELP TEXT ----------
 def _help_text_free():
     return """🛡 *HƯỚNG DẪN SỬ DỤNG – GÓI CƠ BẢN*
 
 👣 *Bắt đầu nhanh*
 1) Thêm bot vào nhóm và cấp quyền *Delete messages*.
-2) Admin (ID trong biến `ADMIN_IDS`) dùng lệnh dưới để bật/tắt.
-3) Nếu muốn nhận hướng dẫn riêng, mở chat riêng với bot rồi gửi */start*.
+2) Admin (ID trong `ADMIN_IDS`) dùng lệnh dưới để bật/tắt.
+3) Muốn nhận hướng dẫn riêng, mở DM bot rồi gửi */start*.
 
-📌 *Quản lý nhóm (miễn phí)*
-/status – Xem cấu hình & thời hạn Pro
-/nolinks on|off – Chặn link & @mention (trừ whitelist)
-/noforwards on|off – Chặn tin nhắn forward
-/nobots on|off – Cấm mời bot khác vào nhóm
-
-📜 *Danh sách*
-/whitelist_add <text> – Thêm từ/miền được phép
-/whitelist_remove <text> – Xoá whitelist
-/whitelist_list – Xem whitelist
-/blacklist_add <text> – Thêm từ cấm
-/blacklist_remove <text> – Xoá blacklist
-/blacklist_list – Xem blacklist
-
-🧪 *Dùng thử Pro 7 ngày (admin)*
-/trial7 – Kích hoạt dùng thử cho *nhóm hiện tại* (mỗi nhóm 1 lần).  
-Khi hết hạn, bot sẽ tự nhắc và tính năng Pro sẽ tắt.
-
-🔑 *Nâng cấp Pro*
-/applykey <key> – Kích hoạt Pro bằng key
-/genkey <tháng> – (Admin) tạo key thử nghiệm
-/keys_list – (Admin) xem danh sách key
-
-🛠 *Tiện ích*
-/myid – Xem user_id của bạn
-/chatid – Xem chat_id của nhóm
-
-💬 Hỗ trợ: @Myyduyenng
-""".strip()
-
-def _help_text_pro():
-    return """💎 *HƯỚNG DẪN SỬ DỤNG – GÓI PRO (ĐÃ KÍCH HOẠT)*
-
-🚀 *Tăng cường bảo vệ*
-/antiflood on|off – Chống spam (>3 tin/20s, bỏ qua admin bot)
-/noevents on|off – Ẩn thông báo join/leave
-
-🔧 *Cơ bản (giống gói Free)*
+📌 *Quản lý nhóm*
 /status – Xem cấu hình & hạn Pro
 /nolinks on|off – Chặn link & @mention (trừ whitelist)
 /noforwards on|off – Chặn forward
@@ -282,23 +239,45 @@ def _help_text_pro():
 /whitelist_add <text>, /whitelist_remove <text>, /whitelist_list
 /blacklist_add <text>, /blacklist_remove <text>, /blacklist_list
 
-🔑 *Key*
-/applykey <key> – Gia hạn/kích hoạt
-/genkey <tháng> – (Admin) tạo key
-/keys_list – (Admin) xem danh sách key
+🧪 *Dùng thử Pro 7 ngày (admin)*
+/trial7 – Kích hoạt dùng thử cho *nhóm hiện tại* (mỗi nhóm 1 lần). Hết hạn tự tắt.
+
+🔑 *Nâng cấp Pro*
+/applykey <key>, /genkey <tháng>, /keys_list
 
 🛠 *Tiện ích*
-/myid – User ID
-/chatid – Chat ID
+/myid, /chatid
 
-ℹ️ Khi Pro hết hạn (thử/keys), bot sẽ nhắc – nhóm tự động trở về chế độ Free.
+💬 Hỗ trợ: @Myyduyenng
 """.strip()
-# ----------------------------------------------------
+
+def _help_text_pro():
+    return """💎 *HƯỚNG DẪN – GÓI PRO (ĐÃ KÍCH HOẠT)*
+
+🚀 *Tăng cường*
+/antiflood on|off – Chống spam (>3 tin/20s, bỏ qua admin)
+/noevents on|off – Ẩn join/leave
+
+🔧 *Cơ bản*
+/status · /nolinks · /noforwards · /nobots
+
+📜 *Danh sách*
+/whitelist_add, /whitelist_remove, /whitelist_list
+/blacklist_add, /blacklist_remove, /blacklist_list
+
+🔑 *Key*
+/applykey <key> · /genkey <tháng> · /keys_list
+
+🛠 *Tiện ích*
+/myid · /chatid
+
+ℹ️ Khi Pro hết hạn (thử/keys), bot sẽ nhắc – nhóm tự trở về gói Free.
+""".strip()
+# ---------------------------------------------
 
 def help_cmd(update: Update, context: CallbackContext):
     chat = update.effective_chat
     user_id = update.effective_user.id
-    # chỉ admin mới nhận help chi tiết khi gọi trong group (và qua DM trước)
     if chat.type in ("group","supergroup") and not is_admin(user_id):
         return
     pro = is_pro(chat.id)
@@ -507,6 +486,14 @@ def start_bot():
         logger.error("BOT_TOKEN missing"); return
 
     updater=Updater(BOT_TOKEN, use_context=True)
+
+    # **QUAN TRỌNG**: tắt webhook trước khi polling để tránh Conflict
+    try:
+        updater.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook deleted, pending updates dropped.")
+    except Exception as e:
+        logger.warning("delete_webhook failed (safe to ignore if none set): %s", e)
+
     dp=updater.dispatcher
 
     # core
@@ -545,11 +532,7 @@ def start_bot():
     jobq.run_repeating(pro_expiry_check, interval=30*60, first=60)
 
     logger.info("🚀 Bot polling...")
-    try:
-        updater.start_polling(drop_pending_updates=True, timeout=20)
-    except Exception as e:
-        logger.error("start_polling error (possible concurrent instance): %s", e)
-        raise
+    updater.start_polling(drop_pending_updates=True, timeout=20)
     updater.idle()
 
 # ================== FLASK (Render keep-alive) ==================
