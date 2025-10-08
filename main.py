@@ -1,12 +1,14 @@
-# HotroSecurityBot - Full (Render + PTB 13.15)
+# HotroSecurityBot - Full (Render + PTB 13.15) + Pro LOCKED UI
 import logging, os, re, sqlite3, threading, time, secrets
 from collections import deque
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from flask import Flask
-from telegram import Update, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram import Update, ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+)
 
 # ================== ENV ==================
 load_dotenv()
@@ -182,7 +184,6 @@ FLOOD_WINDOW = 20
 FLOOD_LIMIT = 3
 user_buckets = {}  # {(chat_id, user_id): deque[timestamps]}
 
-from collections import deque
 def _is_flood(chat_id, user_id):
     key = (chat_id, user_id)
     dq = user_buckets.get(key)
@@ -201,8 +202,17 @@ def start(update: Update, context: CallbackContext):
         "Dùng /status để xem cấu hình hoặc /help để biết thêm lệnh."
     )
 
+def _pro_keyboard_locked():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Kích hoạt Pro", callback_data="pro_locked:apply")],
+        [InlineKeyboardButton("ℹ️ Tính năng gói Pro", callback_data="pro_locked:info")],
+    ])
+
 def help_cmd(update: Update, context: CallbackContext):
-    text = [
+    chat_id = update.effective_chat.id
+    pro_on = is_pro(chat_id)
+
+    core = [
         "🛟 *HƯỚNG DẪN SỬ DỤNG*",
         "",
         "• `/start` – Kiểm tra bot",
@@ -212,8 +222,8 @@ def help_cmd(update: Update, context: CallbackContext):
         "• `/nolinks on|off` – Bật/tắt chặn link & @mention",
         "• `/noforwards on|off` – Chặn tin nhắn forward",
         "• `/nobots on|off` – Chặn thành viên mời bot vào",
-        "• `/antiflood on|off` [Pro] – Chống spam (3 tin/20s)",
-        "• `/noevents on|off` [Pro] – Ẩn thông báo join/left",
+        "• `/antiflood on|off` – Chống spam (3 tin/20s) " + ("(Pro)" if not pro_on else ""),
+        "• `/noevents on|off` – Ẩn thông báo join/left " + ("(Pro)" if not pro_on else ""),
         "",
         "*Whitelist/Blacklist (admin)*",
         "• `/whitelist_add <từ|domain>` / `/whitelist_remove <...>`",
@@ -221,13 +231,37 @@ def help_cmd(update: Update, context: CallbackContext):
         "• `/blacklist_add <từ|domain>` / `/blacklist_remove <...>`",
         "• `/blacklist_list` – Liệt kê blacklist",
         "",
-        "*Pro*",
-        "• `/applykey <key>` – Kích hoạt Pro cho *nhóm hiện tại*",
-        "*Pro (admin tạo key)*",
-        "• `/genkey <tháng>` – Tạo key",
-        "• `/keys_list` – Liệt kê key",
     ]
-    update.message.reply_text("\n".join(text), parse_mode=ParseMode.MARKDOWN)
+
+    if pro_on:
+        pro_lines = [
+            "✨ *Pro (đã kích hoạt)*",
+            "• `/applykey <key>` – Gia hạn/áp thêm thời gian",
+            "• Siết chặt mentions (xóa mọi @username không nằm trong whitelist)",
+            "• Ưu tiên blacklist (xoá ngay lập tức)",
+            "• Ẩn sự kiện nâng cao",
+        ]
+        update.message.reply_text("\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN)
+    else:
+        pro_lines = [
+            "🔒 *Pro (chưa kích hoạt)*",
+            "• (LOCKED) `/applykey <key>` – Kích hoạt Pro cho *nhóm hiện tại*",
+            "• (LOCKED) Siết chặt mentions",
+            "• (LOCKED) Ưu tiên blacklist",
+            "• (LOCKED) Ẩn sự kiện nâng cao",
+        ]
+        update.message.reply_text(
+            "\n".join(core + pro_lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_pro_keyboard_locked()
+        )
+
+def pro_locked_cb(update: Update, context: CallbackContext):
+    q = update.callback_query
+    q.answer()
+    _, action = q.data.split(":", 1)
+    if action == "apply":
+        q.answer("Dùng /applykey <key> để kích hoạt Pro cho nhóm hiện tại.", show_alert=True)
+    else:
+        q.answer("Pro gồm: siết @mention, ưu tiên blacklist, ẩn sự kiện nâng cao…", show_alert=True)
 
 def status(update: Update, context: CallbackContext):
     chat = update.effective_chat
@@ -261,7 +295,7 @@ def nobots(update, context):     _toggle(update, context, "nobots", pro_only=Fal
 def antiflood(update, context):  _toggle(update, context, "antiflood", pro_only=True)  # Pro
 def noevents(update, context):   _toggle(update, context, "noevents", pro_only=True)   # Pro
 
-# whitelist / blacklist (Free)
+# whitelist / blacklist
 def whitelist_add(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
         update.message.reply_text("❌ Bạn không phải admin."); return
@@ -367,7 +401,7 @@ def message_handler(update: Update, context: CallbackContext):
 
     # Anti-flood [Pro]
     if s["antiflood"] and not is_admin(user_id):
-        if not is_pro(chat_id) and not require_pro(update, "antiflood"):  # vẫn cho thấy lệnh nhưng chặn khi dùng
+        if not is_pro(chat_id) and not require_pro(update, "antiflood"):
             return
         if _is_flood(chat_id, user_id):
             try: msg.delete()
@@ -401,7 +435,7 @@ def message_handler(update: Update, context: CallbackContext):
             except Exception: pass
             return
 
-    # Mention filter – siết chặt hơn nếu Pro
+    # Mention filter (siết chặt hơn nếu Pro cũng đã bao phủ ở whitelist)
     if s["nolinks"] and mentions:
         for m in mentions:
             ok = any(w.lower() in m.lower() for w in wl)
@@ -442,6 +476,9 @@ def start_bot():
     dp.add_handler(CommandHandler("keys_list", keys_list_cmd))
     dp.add_handler(CommandHandler("applykey", applykey_cmd, pass_args=True))
 
+    # pro-locked callbacks
+    dp.add_handler(CallbackQueryHandler(pro_locked_cb, pattern=r"^pro_locked:"))
+
     # events
     dp.add_handler(MessageHandler(Filters.status_update, delete_service_messages))
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, new_members))
@@ -465,10 +502,8 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port)
 
-# ================== RUN (Flask main thread to avoid 502) ==================
+# ================== RUN (Flask main thread; bot background) ==================
 if __name__ == "__main__":
-    # chạy bot ở background
     t = threading.Thread(target=start_bot, daemon=True)
     t.start()
-    # Flask giữ cổng ở main thread để Render health-check OK
     run_flask()
