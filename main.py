@@ -563,22 +563,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 # =============== BOOT =====================
-def start_bot():
-    init_db()
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN missing"); return
-
+def build_app() -> Application:
     application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     async def post_init(app: Application):
-        # Xoá webhook (nếu có) trước khi polling để tránh lỗi Conflict
+        # Xoá webhook cũ để tránh 409 Conflict
         try:
             await app.bot.delete_webhook(drop_pending_updates=True)
             logger.info("Webhook cleared successfully before polling.")
         except Exception as e:
-            logger.warning(f"Failed to delete webhook: {e}")
-        # Scheduler
+            logger.warning("Failed to delete webhook: %s", e)
+        # Scheduler check hết hạn Pro
         app.job_queue.run_repeating(pro_expiry_check, interval=30*60, first=60)
+        logger.info("JobQueue scheduled.")
 
     # Commands
     application.add_handler(CommandHandler("start", start))
@@ -612,11 +609,8 @@ def start_bot():
     application.add_handler(MessageHandler(filters.ALL, message_handler))
 
     application.post_init = post_init
-    # Chạy polling trong background thread (để Flask giữ alive trên Render)
-    threading.Thread(
-        target=lambda: application.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES),
-        daemon=True
-    ).start()
+    return application
+
 
 # =============== FLASK (keep-alive) =======
 flask_app = Flask(__name__)
@@ -626,11 +620,24 @@ def home():
     return "✅ HotroSecurityBot running (PTB20) – OK"
 
 def run_flask():
-    port=int(os.environ.get("PORT",10000))
+    port = int(os.environ.get("PORT", 10000))
+    logger.info("Starting Flask on port %s ...", port)
     flask_app.run(host="0.0.0.0", port=port)
+
 
 # =============== RUN =======================
 if __name__ == "__main__":
-    t = threading.Thread(target=start_bot, daemon=True)
-    t.start()
-    run_flask()
+    load_dotenv()
+    init_db()
+
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN missing! Set it in Render Environment or .env")
+        raise SystemExit(1)
+
+    # Chạy Flask ở background để Render thấy service “listening”
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # PTB polling chạy ở MAIN THREAD (ổn định nhất)
+    app = build_app()
+    logger.info("Starting Telegram polling ...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
