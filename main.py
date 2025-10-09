@@ -202,6 +202,61 @@ def consume_key(key: str, user_id: int):
 # ================== FILTERS / STATE ==================
 URL_RE = re.compile(r"(https?://[^\s]+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{5,64})")
+# Bắt domain trần và IPv4 (không cần http/https)
+DOMAIN_RE = re.compile(
+    r"\b((?:[a-z0-9-]{1,63}\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{2,}))\b(?:[/:?&#][^\s]*)?",
+    re.IGNORECASE,
+)
+IPV4_RE = re.compile(
+    r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#][^\s]*)?\b",
+    re.IGNORECASE,
+)
+
+def extract_links(msg):
+    """
+    Lấy tất cả link trong message:
+    - Từ Telegram entities (URL, TEXT_LINK)
+    - Từ regex domain trần & IPv4
+    Trả về list[str] (đã loại trùng, giữ nguyên text gốc).
+    """
+    text = msg.text or msg.caption or ""
+    found = []
+
+    # 1) Entities do Telegram phân tích (ổn định nhất)
+    entities = []
+    if msg.entities:
+        entities.extend(msg.entities)
+    if msg.caption_entities:
+        entities.extend(msg.caption_entities)
+
+    for ent in entities:
+        t = ent.type
+        if t == "text_link" and getattr(ent, "url", None):
+            found.append(ent.url)
+        elif t in ("url", "mention", "email"):  # url là chính; mention/email tùy bạn có muốn chặn
+            try:
+                # Lấy đoạn text khớp entity
+                start = ent.offset
+                end = ent.offset + ent.length
+                found.append(text[start:end])
+            except Exception:
+                pass
+
+    # 2) Regex cho domain trần & IPv4 (phòng khi client không tạo entity)
+    found.extend(DOMAIN_RE.findall(text))
+    found.extend(IPV4_RE.findall(text))
+
+    # Chuẩn hóa & loại trùng
+    # Với DOMAIN_RE/IPV4_RE, .findall trả về group -> đã là chuỗi
+    # Giữ nguyên letter-case để đối chiếu whitelist theo cách hiện tại (bạn đang .lower() khi so)
+    uniq = []
+    seen = set()
+    for u in found:
+        u_strip = u.strip()
+        if u_strip and u_strip.lower() not in seen:
+            uniq.append(u_strip)
+            seen.add(u_strip.lower())
+    return uniq
 
 FLOOD_WINDOW, FLOOD_LIMIT = 20, 3
 user_buckets = {}
@@ -508,13 +563,69 @@ def pro_expiry_check(context: CallbackContext):
         logger.error("pro_expiry_check error: %s", e)
 
 # ================== MESSAGE HANDLER ==================
-def message_handler(update,context):
-    msg=update.message
-    if not msg: return
-    chat_id=msg.chat.id; user_id=msg.from_user.id
-    s=get_setting(chat_id)
-    wl=list_whitelist(chat_id); bl=list_blacklist(chat_id)
-    txt=msg.text or msg.caption or ""
+DOMAIN_RE = re.compile(
+    r"\b((?:[a-z0-9-]{1,63}\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{2,}))\b(?:[/:?&#][^\s]*)?",
+    re.IGNORECASE,
+)
+IPV4_RE = re.compile(
+    r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#][^\s]*)?\b",
+    re.IGNORECASE,
+)
+
+def extract_links(msg):
+    """
+    Lấy tất cả link trong message:
+    - Từ Telegram entities (URL, TEXT_LINK)
+    - Từ regex domain trần & IPv4
+    """
+    text = msg.text or msg.caption or ""
+    found = []
+
+    # 1️⃣ Entities do Telegram tự nhận diện
+    entities = []
+    if msg.entities:
+        entities.extend(msg.entities)
+    if msg.caption_entities:
+        entities.extend(msg.caption_entities)
+
+    for ent in entities:
+        t = ent.type
+        if t == "text_link" and getattr(ent, "url", None):
+            found.append(ent.url)
+        elif t in ("url", "mention", "email"):
+            try:
+                start = ent.offset
+                end = ent.offset + ent.length
+                found.append(text[start:end])
+            except Exception:
+                pass
+
+    # 2️⃣ Regex cho domain trần & IPv4
+    found.extend(DOMAIN_RE.findall(text))
+    found.extend(IPV4_RE.findall(text))
+
+    # 3️⃣ Loại trùng
+    uniq = []
+    seen = set()
+    for u in found:
+        u_strip = u.strip()
+        if u_strip and u_strip.lower() not in seen:
+            uniq.append(u_strip)
+            seen.add(u_strip.lower())
+    return uniq
+
+
+def message_handler(update, context):
+    msg = update.message
+    if not msg:
+        return
+
+    chat_id = msg.chat.id
+    user_id = msg.from_user.id
+    s = get_setting(chat_id)
+    wl = list_whitelist(chat_id)
+    bl = list_blacklist(chat_id)
+    txt = msg.text or msg.caption or ""
 
     # ----- Admin bypass -----
     if is_admin(user_id):
@@ -526,37 +637,59 @@ def message_handler(update,context):
 
     # ----- Blacklist ưu tiên -----
     if any(b.lower() in txt.lower() for b in bl):
-        try: msg.delete()
-        except: pass
+        try:
+            msg.delete()
+        except:
+            pass
         return
 
     # ----- Link & mentions (Free) -----
-    urls=URL_RE.findall(txt); mentions=MENTION_RE.findall(txt)
+    mentions = MENTION_RE.findall(txt)
+    urls = extract_links(msg)  # 👈 dùng hàm mới để bắt cả domain trần
+
     if s["nolinks"]:
-        if urls and not any(any(w.lower() in u.lower() for w in wl) for u in urls):
-            try: msg.delete()
-            except: pass
-            return
+        if urls:
+            allowed = False
+            if wl:
+                for u in urls:
+                    if any(w.lower() in u.lower() for w in wl):
+                        allowed = True
+                        break
+            if not allowed:
+                try:
+                    msg.delete()
+                except:
+                    pass
+                return
+
         if mentions:
             for m in mentions:
                 if not any(w.lower() in m.lower() for w in wl):
-                    try: msg.delete()
-                    except: pass
+                    try:
+                        msg.delete()
+                    except:
+                        pass
                     return
 
     # ----- Forwards (Free) -----
-    if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
-        try: msg.delete()
-        except: pass
+    if s["noforwards"] and (
+        msg.forward_date or msg.forward_from or msg.forward_from_chat
+    ):
+        try:
+            msg.delete()
+        except:
+            pass
         return
 
     # ----- Anti-flood (Pro) -----
     if s["antiflood"]:
-        if not is_pro(chat_id): 
+        if not is_pro(chat_id):
             return
-        if _is_flood(chat_id,user_id):
-            try: msg.delete()
-            except: pass
+        if _is_flood(chat_id, user_id):
+            try:
+                msg.delete()
+            except:
+                pass
             return
 
 # ================== BOOT ==================
