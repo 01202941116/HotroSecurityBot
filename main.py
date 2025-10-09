@@ -563,9 +563,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 # =============== BOOT =====================
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, Application
-from telegram.constants import ParseMode
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Application, ContextTypes, filters
 from telegram import Update
+from telegram.constants import ParseMode
 
 def build_app() -> Application:
     async def post_init(app: Application):
@@ -575,14 +575,19 @@ def build_app() -> Application:
             logger.info("Webhook cleared successfully before polling.")
         except Exception as e:
             logger.warning("Failed to delete webhook: %s", e)
-        # Lên lịch check hết hạn Pro
+        # Lịch check hết hạn Pro
         app.job_queue.run_repeating(pro_expiry_check, interval=30*60, first=60)
         logger.info("JobQueue scheduled.")
 
+    token = os.getenv("BOT_TOKEN", "")
+    if not token:
+        logger.error("BOT_TOKEN is empty! Set it in Render → Environment.")
+        raise SystemExit(1)
+
     application: Application = (
         ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)     # <── set post_init qua builder (PTB20)
+        .token(token)
+        .post_init(post_init)   # PTB20: gắn post_init qua builder
         .build()
     )
 
@@ -619,7 +624,6 @@ def build_app() -> Application:
 
     return application
 
-
 # =============== FLASK (keep-alive) =======
 from flask import Flask
 flask_app = Flask(__name__)
@@ -633,21 +637,25 @@ def run_flask():
     logger.info("Starting Flask on port %s ...", port)
     flask_app.run(host="0.0.0.0", port=port)
 
-
 # =============== RUN =======================
 if __name__ == "__main__":
     load_dotenv()
     init_db()
 
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN missing! Set it in Render Environment or .env")
-        raise SystemExit(1)
+    admin_ids_env = os.getenv("ADMIN_IDS", "")
+    if admin_ids_env:
+        try:
+            global ADMIN_IDS
+            ADMIN_IDS = [int(x.strip()) for x in admin_ids_env.split(",") if x.strip()]
+            logger.info("ADMIN_IDS loaded: %s", ADMIN_IDS)
+        except Exception as e:
+            logger.warning("ADMIN_IDS parse error: %s", e)
 
-    # Chạy Flask ở background để Render thấy service “listening”
+    # Chạy Flask ở background để Render detect port
     import threading
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # PTB polling chạy ở MAIN THREAD (ổn định trên Render)
+    # Polling chạy foreground (ổn định trên Render)
     app = build_app()
     logger.info("Starting Telegram polling ...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
