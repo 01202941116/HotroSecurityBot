@@ -86,7 +86,6 @@ def safe_reply_private(update: Update, context: CallbackContext, text: str, **kw
             context.bot.send_message(chat_id=user_id, text=text, **kwargs)
             return
     except Exception as e:
-        # Forbidden: bot can't initiate conversation with a user
         logger.warning("safe_reply_private: DM failed -> %s", e)
 
     # fallback gửi trong group (nếu có), nhắc user /start bot ở DM
@@ -95,7 +94,7 @@ def safe_reply_private(update: Update, context: CallbackContext, text: str, **kw
             context.bot.send_message(
                 chat_id=chat_id,
                 text="(🔔 Chỉ báo cho admin) " + text + "\n\nℹ️ Nếu muốn nhận tin riêng, hãy mở DM với bot và gửi /start.",
-                **{k:v for k,v in kwargs.items() if k != "reply_markup"}  # tránh inline markup rò rỉ
+                **{k:v for k,v in kwargs.items() if k != "reply_markup"}
             )
     except Exception as e2:
         logger.warning("safe_reply_private: group fallback failed -> %s", e2)
@@ -139,7 +138,7 @@ def is_pro(chat_id: int) -> bool:
     s = get_setting(chat_id)
     return bool(s["pro_until"] and s["pro_until"] > now_utc())
 
-# whitelist/blacklist ops
+# ===== whitelist/blacklist ops =====
 def add_whitelist(chat_id, text):
     conn=_conn();cur=conn.cursor()
     cur.execute("INSERT INTO whitelist(chat_id,text) VALUES(?,?)",(chat_id,text.strip()))
@@ -170,7 +169,7 @@ def list_blacklist(chat_id):
     cur.execute("SELECT text FROM blacklist WHERE chat_id=?",(chat_id,))
     r=[x[0] for x in cur.fetchall()];conn.close();return r
 
-# Pro keys (tuỳ chọn, vẫn giữ)
+# ===== Pro keys =====
 def gen_key(months=1):
     key = secrets.token_urlsafe(12)
     created = now_utc()
@@ -217,40 +216,34 @@ def extract_links(msg):
     Lấy tất cả link trong message:
     - Từ Telegram entities (URL, TEXT_LINK)
     - Từ regex domain trần & IPv4
-    Trả về list[str] (đã loại trùng, giữ nguyên text gốc).
+    Trả về list[str] (đã loại trùng).
     """
     text = msg.text or msg.caption or ""
     found = []
 
-    # 1) Entities do Telegram phân tích (ổn định nhất)
+    # Entities do Telegram tự nhận diện
     entities = []
-    if msg.entities:
-        entities.extend(msg.entities)
-    if msg.caption_entities:
-        entities.extend(msg.caption_entities)
+    if msg.entities: entities.extend(msg.entities)
+    if msg.caption_entities: entities.extend(msg.caption_entities)
 
     for ent in entities:
         t = ent.type
         if t == "text_link" and getattr(ent, "url", None):
             found.append(ent.url)
-        elif t in ("url", "mention", "email"):  # url là chính; mention/email tùy bạn có muốn chặn
+        elif t in ("url", "mention", "email"):
             try:
-                # Lấy đoạn text khớp entity
                 start = ent.offset
                 end = ent.offset + ent.length
                 found.append(text[start:end])
             except Exception:
                 pass
 
-    # 2) Regex cho domain trần & IPv4 (phòng khi client không tạo entity)
+    # Regex cho domain trần & IPv4
     found.extend(DOMAIN_RE.findall(text))
     found.extend(IPV4_RE.findall(text))
 
-    # Chuẩn hóa & loại trùng
-    # Với DOMAIN_RE/IPV4_RE, .findall trả về group -> đã là chuỗi
-    # Giữ nguyên letter-case để đối chiếu whitelist theo cách hiện tại (bạn đang .lower() khi so)
-    uniq = []
-    seen = set()
+    # Loại trùng
+    uniq, seen = [], set()
     for u in found:
         u_strip = u.strip()
         if u_strip and u_strip.lower() not in seen:
@@ -310,9 +303,9 @@ def _help_text_free():
 • `/whitelist_add <text>`
   → Cho phép <text> bỏ qua chặn (áp dụng cho *link/mention/từ khoá*).
   Ví dụ:
-  - `/whitelist_add youtube.com`  (cho phép link youtube)
-  - `/whitelist_add @myshop`      (cho phép mention @myshop)
-  - `/whitelist_add khuyen mai`   (cho phép cụm từ “khuyen mai”)
+  - `/whitelist_add youtube.com`
+  - `/whitelist_add @myshop`
+  - `/whitelist_add khuyen mai`
 
 • `/whitelist_remove <text>`  → Xoá khỏi whitelist
 • `/whitelist_list`           → Xem toàn bộ whitelist
@@ -531,10 +524,10 @@ def trial7_cmd(update: Update, context: CallbackContext):
         f"🎁 Đã kích hoạt *Pro dùng thử 7 ngày* cho {where_txt} đến {until.strftime('%d/%m/%Y %H:%M UTC')}.",
         parse_mode=ParseMode.MARKDOWN
     )
+
 # ----- SCHEDULER: kiểm tra hết hạn Pro mỗi 30 phút -----
 def pro_expiry_check(context: CallbackContext):
     try:
-        # Duyệt tất cả chat có cấu hình
         conn=_conn();cur=conn.cursor()
         cur.execute("SELECT chat_id, pro_until, last_pro_notice FROM chat_settings")
         rows = cur.fetchall(); conn.close()
@@ -543,19 +536,16 @@ def pro_expiry_check(context: CallbackContext):
                 continue
             pro_dt = datetime.fromisoformat(pro_until)
             if pro_dt > now_utc():
-                # reset last notice nếu còn hạn
                 if last_notice:
                     set_last_pro_notice(chat_id, None)
                 continue
             # Pro hết hạn -> set None & thông báo 1 lần
             if not last_notice:
-                set_pro_until(chat_id, now_utc() - timedelta(seconds=1))  # đảm bảo is_pro False
+                set_pro_until(chat_id, now_utc() - timedelta(seconds=1))
                 set_last_pro_notice(chat_id, now_utc())
-                # DM admin (nếu có), fallback group
                 msg = ("⛔ Gói Pro của nhóm đã *hết hạn dùng thử/keys*.\n"
                        "Vui lòng liên hệ admin để gia hạn hoặc dùng /applykey <key>.")
                 try:
-                    # gửi vào nhóm (tối thiểu) vì có thể không biết admin nào đã /start
                     context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
                 except Exception as e:
                     logger.warning("Notify expiry failed for %s: %s", chat_id, e)
@@ -563,58 +553,6 @@ def pro_expiry_check(context: CallbackContext):
         logger.error("pro_expiry_check error: %s", e)
 
 # ================== MESSAGE HANDLER ==================
-DOMAIN_RE = re.compile(
-    r"\b((?:[a-z0-9-]{1,63}\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{2,}))\b(?:[/:?&#][^\s]*)?",
-    re.IGNORECASE,
-)
-IPV4_RE = re.compile(
-    r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#][^\s]*)?\b",
-    re.IGNORECASE,
-)
-
-def extract_links(msg):
-    """
-    Lấy tất cả link trong message:
-    - Từ Telegram entities (URL, TEXT_LINK)
-    - Từ regex domain trần & IPv4
-    """
-    text = msg.text or msg.caption or ""
-    found = []
-
-    # 1️⃣ Entities do Telegram tự nhận diện
-    entities = []
-    if msg.entities:
-        entities.extend(msg.entities)
-    if msg.caption_entities:
-        entities.extend(msg.caption_entities)
-
-    for ent in entities:
-        t = ent.type
-        if t == "text_link" and getattr(ent, "url", None):
-            found.append(ent.url)
-        elif t in ("url", "mention", "email"):
-            try:
-                start = ent.offset
-                end = ent.offset + ent.length
-                found.append(text[start:end])
-            except Exception:
-                pass
-
-    # 2️⃣ Regex cho domain trần & IPv4
-    found.extend(DOMAIN_RE.findall(text))
-    found.extend(IPV4_RE.findall(text))
-
-    # 3️⃣ Loại trùng
-    uniq = []
-    seen = set()
-    for u in found:
-        u_strip = u.strip()
-        if u_strip and u_strip.lower() not in seen:
-            uniq.append(u_strip)
-            seen.add(u_strip.lower())
-    return uniq
-
-
 def message_handler(update, context):
     msg = update.message
     if not msg:
@@ -627,25 +565,19 @@ def message_handler(update, context):
     bl = list_blacklist(chat_id)
     txt = msg.text or msg.caption or ""
 
-    # ----- Admin bypass -----
+    # Admin bypass
     if is_admin(user_id):
-        # Nếu muốn blacklist vẫn áp cho admin, bỏ comment 3 dòng dưới:
-        # if any(b.lower() in txt.lower() for b in bl):
-        #     try: msg.delete()
-        #     except: pass
         return
 
-    # ----- Blacklist ưu tiên -----
+    # Blacklist ưu tiên
     if any(b.lower() in txt.lower() for b in bl):
-        try:
-            msg.delete()
-        except:
-            pass
+        try: msg.delete()
+        except: pass
         return
 
-    # ----- Link & mentions (Free) -----
+    # Link & mentions
     mentions = MENTION_RE.findall(txt)
-    urls = extract_links(msg)  # 👈 dùng hàm mới để bắt cả domain trần
+    urls = extract_links(msg)  # bắt cả domain trần lẫn http(s) & IPv4
 
     if s["nolinks"]:
         if urls:
@@ -656,40 +588,30 @@ def message_handler(update, context):
                         allowed = True
                         break
             if not allowed:
-                try:
-                    msg.delete()
-                except:
-                    pass
+                try: msg.delete()
+                except: pass
                 return
 
         if mentions:
             for m in mentions:
                 if not any(w.lower() in m.lower() for w in wl):
-                    try:
-                        msg.delete()
-                    except:
-                        pass
+                    try: msg.delete()
+                    except: pass
                     return
 
-    # ----- Forwards (Free) -----
-    if s["noforwards"] and (
-        msg.forward_date or msg.forward_from or msg.forward_from_chat
-    ):
-        try:
-            msg.delete()
-        except:
-            pass
+    # Forwards
+    if s["noforwards"] and (msg.forward_date or msg.forward_from or msg.forward_from_chat):
+        try: msg.delete()
+        except: pass
         return
 
-    # ----- Anti-flood (Pro) -----
+    # Anti-flood (Pro)
     if s["antiflood"]:
         if not is_pro(chat_id):
             return
         if _is_flood(chat_id, user_id):
-            try:
-                msg.delete()
-            except:
-                pass
+            try: msg.delete()
+            except: pass
             return
 
 # ================== BOOT ==================
@@ -702,7 +624,7 @@ def start_bot():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    # ✅ FIX: xóa webhook cũ trước khi polling để tránh lỗi Conflict
+    # Xóa webhook cũ trước khi polling để tránh lỗi Conflict
     try:
         updater.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook cleared successfully before polling.")
@@ -737,8 +659,8 @@ def start_bot():
     dp.add_handler(CommandHandler("applykey", applykey_cmd, pass_args=True))
     dp.add_handler(CommandHandler("trial7", trial7_cmd))
 
-    # messages
-    dp.add_handler(MessageHandler(Filters.text | Filters.caption, message_handler))
+    # messages (an toàn cho PTB 13.x nhiều phiên bản)
+    dp.add_handler(MessageHandler(Filters.all, message_handler))
 
     # scheduler: check pro expiry each 30 minutes
     jobq: JobQueue = updater.job_queue
@@ -762,11 +684,11 @@ def home():
 
 def run_flask():
     port=int(os.environ.get("PORT",10000))
-    # Debug off vì Render log đã có
     flask_app.run(host="0.0.0.0",port=port)
 
 # ================== RUN ==================
 if __name__=="__main__":
     t=threading.Thread(target=start_bot,daemon=True)
     t.start()
+    time.sleep(3)  # cho polling ổn định rồi mới mở Flask (tránh treo)
     run_flask()
