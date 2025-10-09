@@ -59,10 +59,17 @@ async def safe_reply_private(update:Update, context:ContextTypes.DEFAULT_TYPE, t
             await context.bot.send_message(chat_id=user_id, text=text, **kwargs); return
     except Exception as e:
         logger.warning("safe_reply_private DM fail: %s", e)
-    try:
-        if chat_id:
-            k=dict(kwargs); k.pop("reply_markup", None)
-            await context.bot.send_message(chat_id=chat_id, text="(🔔 Chỉ báo cho admin) "+text+"
+    # -*- coding: utf-8 -*-  # (tùy chọn) thêm ngay dòng đầu file để chắc Unicode
+
+try:
+    if chat_id:
+        context.bot.send_message(
+            chat_id=chat_id,
+            text=f"(🔔 Chỉ báo cho admin) {text}\n\nℹ️ Nếu muốn nhận tin riêng, hãy mở DM với bot và gửi /start."
+            # không truyền reply_markup nếu bạn đang lọc ở chỗ khác
+        )
+except Exception as e2:
+    logger.warning("safe_reply_private: group fallback failed -> %s", e2)
 
 ℹ️ Mở DM với bot và gửi /start để nhận riêng.", **k)
     except Exception as e2:
