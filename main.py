@@ -563,9 +563,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 # =============== BOOT =====================
-def build_app() -> Application:
-    application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, Application
+from telegram.constants import ParseMode
+from telegram import Update
 
+def build_app() -> Application:
     async def post_init(app: Application):
         # Xoá webhook cũ để tránh 409 Conflict
         try:
@@ -573,9 +575,16 @@ def build_app() -> Application:
             logger.info("Webhook cleared successfully before polling.")
         except Exception as e:
             logger.warning("Failed to delete webhook: %s", e)
-        # Scheduler check hết hạn Pro
+        # Lên lịch check hết hạn Pro
         app.job_queue.run_repeating(pro_expiry_check, interval=30*60, first=60)
         logger.info("JobQueue scheduled.")
+
+    application: Application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)     # <── set post_init qua builder (PTB20)
+        .build()
+    )
 
     # Commands
     application.add_handler(CommandHandler("start", start))
@@ -608,11 +617,11 @@ def build_app() -> Application:
     # Messages
     application.add_handler(MessageHandler(filters.ALL, message_handler))
 
-    application.post_init = post_init
     return application
 
 
 # =============== FLASK (keep-alive) =======
+from flask import Flask
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -635,9 +644,10 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     # Chạy Flask ở background để Render thấy service “listening”
+    import threading
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # PTB polling chạy ở MAIN THREAD (ổn định nhất)
+    # PTB polling chạy ở MAIN THREAD (ổn định trên Render)
     app = build_app()
     logger.info("Starting Telegram polling ...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
