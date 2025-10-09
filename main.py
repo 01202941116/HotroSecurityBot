@@ -433,19 +433,49 @@ def applykey_cmd(update,context):
 # ----- TRIAL 7 DAYS -----
 def trial7_cmd(update: Update, context: CallbackContext):
     if not is_admin(update.effective_user.id):
-        safe_reply_private(update, context, "❌ Chỉ admin mới kích hoạt dùng thử."); return
-    chat_id = update.effective_chat.id
-    s = get_setting(chat_id)
-    if s["trial_used"]:
-        safe_reply_private(update, context, "ℹ️ Nhóm này đã dùng thử trước đó."); return
-    if is_pro(chat_id):
-        safe_reply_private(update, context, "ℹ️ Nhóm đang ở trạng thái Pro rồi."); return
-    until = now_utc() + timedelta(days=7)
-    set_pro_until(chat_id, until)
-    set_trial_used(chat_id, True)
-    safe_reply_private(update, context, f"🎁 Đã kích hoạt *Pro dùng thử 7 ngày* đến {until.strftime('%d/%m/%Y %H:%M UTC')}.",
-                       parse_mode=ParseMode.MARKDOWN)
+        safe_reply_private(update, context, "❌ Chỉ admin mới kích hoạt dùng thử.")
+        return
 
+    # Mặc định: nhóm hiện tại
+    target_chat_id = update.effective_chat.id
+
+    # Cho phép dùng trong DM: /trial7 <chat_id>
+    if update.effective_chat.type == "private" and not context.args:
+        safe_reply_private(
+            update, context,
+            "ℹ️ Bạn đang dùng trong DM.\n"
+            "• Cách 1: vào nhóm rồi gõ /trial7\n"
+            "• Cách 2: gõ `/trial7 <chat_id>` để bật cho nhóm cụ thể.\n"
+            "Dùng /chatid trong nhóm để lấy chat_id.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if context.args:
+        try:
+            target_chat_id = int(context.args[0])
+        except Exception:
+            safe_reply_private(update, context, "Usage: /trial7 [chat_id]\nVí dụ: /trial7 -1001234567890")
+            return
+
+    s = get_setting(target_chat_id)
+    if s["trial_used"]:
+        safe_reply_private(update, context, "ℹ️ Nhóm này đã dùng thử trước đó.")
+        return
+    if is_pro(target_chat_id):
+        safe_reply_private(update, context, "ℹ️ Nhóm đang ở trạng thái Pro rồi.")
+        return
+
+    until = now_utc() + timedelta(days=7)
+    set_pro_until(target_chat_id, until)
+    set_trial_used(target_chat_id, True)
+
+    where_txt = "nhóm hiện tại" if target_chat_id == update.effective_chat.id else f"chat_id {target_chat_id}"
+    safe_reply_private(
+        update, context,
+        f"🎁 Đã kích hoạt *Pro dùng thử 7 ngày* cho {where_txt} đến {until.strftime('%d/%m/%Y %H:%M UTC')}.",
+        parse_mode=ParseMode.MARKDOWN
+    )
 # ----- SCHEDULER: kiểm tra hết hạn Pro mỗi 30 phút -----
 def pro_expiry_check(context: CallbackContext):
     try:
