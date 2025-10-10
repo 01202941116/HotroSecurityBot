@@ -50,23 +50,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
-        "<b>HotroSecurityBot – Free + Pro</b>\n\n"
-        "<b>FREE</b>\n"
+        "🔥 <b>HotroSecurityBot – Hệ thống bảo vệ nhóm Telegram</b>\n\n"
+        "🔹 <b>FREE:</b>\n"
         "/filter_add <từ> – thêm từ khoá chặn\n"
         "/filter_list – xem danh sách từ khoá\n"
         "/filter_del <id> – xoá filter theo ID\n"
-        "/antilink_on | /antilink_off\n"
-        "/antimention_on | /antimention_off\n"
-        "/antiforward_on | /antiforward_off\n"
-        "/setflood <n> – giới hạn spam (mặc định 3)\n\n"
-        "<b>PRO</b>\n"
-        "/pro – bảng dùng thử/nhập key\n"
-        "/redeem <key> – kích hoạt Pro\n"
-        "/genkey <days> – (OWNER) sinh key\n"
+        "/antilink_on | /antilink_off – chống link\n"
+        "/antimention_on | /antimention_off – chống tag\n"
+        "/antiforward_on | /antiforward_off – chống forward\n"
+        "/setflood <số tin> – giới hạn spam (mặc định 3)\n\n"
+        "💎 <b>PRO:</b>\n"
+        "/pro – xem bản quyền / nhập key\n"
+        "/redeem <key> – kích hoạt key\n"
+        "/genkey <days> – (OWNER) tạo key dùng thử\n"
         "/wl_add <domain> | /wl_del <domain> | /wl_list – whitelist link\n"
-        "/captcha_on | /captcha_off – bật/tắt captcha join\n"
+        "/captcha_on | /captcha_off – bật/tắt captcha join\n\n"
+        f"Hỗ trợ: @{CONTACT_USERNAME or 'admin'}"
     )
-    await context.bot.send_message(update.effective_chat.id, txt, parse_mode="HTML")
+    await update.message.reply_text(txt, parse_mode="HTML")
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
