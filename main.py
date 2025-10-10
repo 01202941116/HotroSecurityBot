@@ -1,7 +1,6 @@
 import os
 import re
 import threading
-import logging
 from datetime import datetime, timedelta
 
 from telegram import Update, ChatPermissions
@@ -10,6 +9,7 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
+# ====== MODULES TRONG PROJECT CỦA BẠN ======
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist
 from pro.handlers import register_handlers
 from pro.scheduler import attach_scheduler
@@ -20,18 +20,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
-# ====== LOGGING ======
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
-)
-log = logging.getLogger("main")
-
 # ====== STATE ======
 FLOOD = {}
 LINK_RE = re.compile(r"(https?://|t\.me/|@\w+)")
 
-# ====== HELPERS ======
+# ====== DB HELPERS ======
 def get_settings(chat_id: int) -> Setting:
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -53,21 +46,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Dùng HTML an toàn (Telegram chỉ hỗ trợ: b, i, u, s, code, pre, a)
     txt = (
         "<b>HotroSecurityBot – Full</b>\n\n"
         "<b>FREE</b>\n"
-        "/filter_add <từ> – thêm từ khoá chặn\n"
+        "/filter_add <code>@spam</code> – thêm từ khoá chặn\n"
         "/filter_list – xem danh sách từ khoá\n"
-        "/filter_del <id> – xoá filter theo ID\n"
+        "/filter_del <code>ID</code> – xoá filter theo ID\n"
         "/antilink_on | /antilink_off\n"
         "/antimention_on | /antimention_off\n"
         "/antiforward_on | /antiforward_off\n"
-        "/setflood <n> – giới hạn spam (mặc định 3)\n\n"
+        "/setflood <code>n</code> – giới hạn spam (mặc định 3)\n\n"
         "<b>PRO</b>\n"
         "/pro – bảng dùng thử / nhập key\n"
-        "/redeem <key> – kích hoạt\n"
-        "/genkey <days> – (OWNER) sinh key\n"
-        "/wl_add <domain> | /wl_del <domain> | /wl_list – whitelist link\n"
+        "/redeem <code>key</code> – kích hoạt\n"
+        "/genkey <code>days</code> – (OWNER) sinh key\n"
+        "/wl_add <code>domain</code> | /wl_del <code>domain</code> | /wl_list\n"
         "/captcha_on | /captcha_off – bật/tắt captcha join\n"
     )
     await context.bot.send_message(update.effective_chat.id, txt, parse_mode="HTML")
@@ -80,8 +74,7 @@ async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pattern = " ".join(context.args)
     db = SessionLocal()
     f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
-    db.add(f)
-    db.commit()
+    db.add(f); db.commit()
     await update.message.reply_text(
         f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML"
     )
@@ -102,8 +95,7 @@ async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
     if not it:
         return await update.message.reply_text("Không tìm thấy ID.")
-    db.delete(it)
-    db.commit()
+    db.delete(it); db.commit()
     await update.message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
 
 async def toggle(update: Update, field: str, val: bool, label: str):
@@ -112,12 +104,11 @@ async def toggle(update: Update, field: str, val: bool, label: str):
     if not s:
         s = Setting(chat_id=update.effective_chat.id)
         db.add(s)
-    setattr(s, field, val)
-    db.commit()
+    setattr(s, field, val); db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
-async def antilink_on(update, context):    await toggle(update, "antilink", True,  "Anti-link")
-async def antilink_off(update, context):   await toggle(update, "antilink", False, "Anti-link")
+async def antilink_on(update, context):    await toggle(update, "antilink",    True,  "Anti-link")
+async def antilink_off(update, context):   await toggle(update, "antilink",    False, "Anti-link")
 async def antimention_on(update, context): await toggle(update, "antimention", True,  "Anti-mention")
 async def antimention_off(update, context):await toggle(update, "antimention", False, "Anti-mention")
 async def antiforward_on(update, context): await toggle(update, "antiforward", True,  "Anti-forward")
@@ -132,17 +123,16 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not s:
         s = Setting(chat_id=update.effective_chat.id)
         db.add(s)
-    s.flood_limit = n
-    db.commit()
+    s.flood_limit = n; db.commit()
     await update.message.reply_text(f"✅ Flood limit = {n}")
 
-# ====== GUARD ======
+# ====== GUARD (anti spam/link/mention/forward) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
 
-    # Không bắt command để /start, /help chạy bình thường
+    # Không bắt các lệnh để tránh nuốt /start, /help...
     if msg.text and msg.text.startswith("/"):
         return
 
@@ -152,43 +142,35 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
-    # keyword filters
+    # Keyword filters
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern.lower() in text.lower():
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+            try: await msg.delete()
+            except Exception: pass
             return
 
-    # anti forward (PTB 21.x dùng forward_origin)
+    # Anti-forward (PTB 21.x: dùng forward_origin)
     if s.antiforward and getattr(msg, "forward_origin", None):
-        try:
-            await msg.delete()
-        except Exception:
-            pass
+        try: await msg.delete()
+        except Exception: pass
         return
 
-    # anti link + whitelist
+    # Anti-link + whitelist
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         allowed = any(d and d.lower() in text.lower() for d in wl)
         if not allowed:
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+            try: await msg.delete()
+            except Exception: pass
             return
 
-    # anti mention
+    # Anti-mention
     if s.antimention and "@" in text:
-        try:
-            await msg.delete()
-        except Exception:
-            pass
+        try: await msg.delete()
+        except Exception: pass
         return
 
-    # anti flood
+    # Anti-flood
     key = (chat_id, msg.from_user.id)
     now = datetime.now().timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
@@ -206,40 +188,44 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== STARTUP HOOK (PTB 21.x) ======
+# ====== STARTUP HOOK ======
 async def on_startup(app: Application):
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
-    log.info("Bot ready as @%s", app.bot_data["contact"])
 
-# ====== ERROR LOG ======
-async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    log.exception("Unhandled error while handling update: %s", update)
+# ====== ERROR LOGGER (tránh crash & dễ debug) ======
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        print("Unhandled error:", context.error)
+    except Exception:
+        pass
 
 # ====== MAIN ======
 def main():
     if not BOT_TOKEN:
         raise SystemExit("Missing BOT_TOKEN")
 
-    from telegram import __version__ as _ptb_ver
-    log.info("PTB boot — token len: %s prefix: %s… ; PTB=%s",
-             len(BOT_TOKEN), BOT_TOKEN[:10], _ptb_ver)
+    print("PTB boot — token len:", len(BOT_TOKEN), "prefix:", BOT_TOKEN[:10], "…")
+    try:
+        from telegram import __version__ as _ptb_ver
+        print("PTB version =", _ptb_ver)
+    except Exception:
+        pass
 
     init_db()
 
-    # keepalive (Flask) để Render free không sleep quá lâu
+    # Flask keepalive để Render free đỡ sleep
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
-        log.warning("keepalive thread could not start", exc_info=True)
+        pass
 
     app = Application.builder().token(BOT_TOKEN).build()
-
-    # Gắn startup hook ĐÚNG CÁCH (PTB 21.x):
-    app.post_init = on_startup
+    app.post_init(on_startup)
+    app.add_error_handler(on_error)
 
     # Commands
     app.add_handler(CommandHandler("start", start))
@@ -255,19 +241,15 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # Pro handlers & scheduler
+    # Phần Pro & lịch
     register_handlers(app)
+    attach_scheduler(app)
 
     # Guard KHÔNG bắt command
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
-    attach_scheduler(app)
-
-    # Error log
-    app.add_error_handler(on_error)
-
-    log.info("Bot starting polling…")
-    app.run_polling()   # <-- Không truyền close_loop ở PTB 21.x
+    print("Bot started.")
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
