@@ -1,8 +1,9 @@
-from keepalive import start_keepalive
+from core.models import init_db
 
 def main():
-    ...
-    start_keepalive()
+    init_db()
+
+    from core.models import SessionLocal, User  # import sau khi DB đã tạo
     ...
 import os
 import re
