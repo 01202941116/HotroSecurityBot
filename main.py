@@ -1,3 +1,4 @@
+# main.py
 import os
 import re
 import threading
@@ -63,7 +64,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/wl_add <domain> | /wl_del <domain> | /wl_list – whitelist link\n"
         "/captcha_on | /captcha_off – bật/tắt captcha join\n"
     )
-    # Gửi an toàn dù update.message có thể None (PTB 21.x)
     await context.bot.send_message(update.effective_chat.id, txt, parse_mode="HTML")
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,11 +93,7 @@ async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Cú pháp: /filter_del <id>")
     fid = int(context.args[0])
     db = SessionLocal()
-    it = (
-        db.query(Filter)
-        .filter_by(id=fid, chat_id=update.effective_chat.id)
-        .one_or_none()
-    )
+    it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
     if not it:
         return await update.message.reply_text("Không tìm thấy ID.")
     db.delete(it)
@@ -114,12 +110,12 @@ async def toggle(update: Update, field: str, val: bool, label: str):
     db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
-async def antilink_on(update, context):   await toggle(update, "antilink",    True,  "Anti-link")
-async def antilink_off(update, context):  await toggle(update, "antilink",    False, "Anti-link")
-async def antimention_on(update, context):await toggle(update, "antimention", True,  "Anti-mention")
-async def antimention_off(update, context):await toggle(update, "antimention",False, "Anti-mention")
-async def antiforward_on(update, context):await toggle(update, "antiforward", True,  "Anti-forward")
-async def antiforward_off(update, context):await toggle(update, "antiforward",False, "Anti-forward")
+async def antilink_on(update, context):    await toggle(update, "antilink",    True,  "Anti-link")
+async def antilink_off(update, context):   await toggle(update, "antilink",    False, "Anti-link")
+async def antimention_on(update, context): await toggle(update, "antimention", True,  "Anti-mention")
+async def antimention_off(update, context):await toggle(update, "antimention", False, "Anti-mention")
+async def antiforward_on(update, context): await toggle(update, "antiforward", True,  "Anti-forward")
+async def antiforward_off(update, context):await toggle(update, "antiforward", False, "Anti-forward")
 
 async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -140,8 +136,8 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
-    # Không xử lý các command để tránh "nuốt" /help, /start,...
-    if msg.text and msg.text.startswith("/"):
+    # Tuyệt đối không xử lý command
+    if (msg.text and msg.text.startswith("/")) or (msg.entities and any(e.type == "bot_command" for e in msg.entities)):
         return
 
     chat_id = update.effective_chat.id
@@ -159,7 +155,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-    # anti forward (PTB 21.x: chỉ còn forward_origin)
+    # anti forward (PTB 21.x)
     if s.antiforward and getattr(msg, "forward_origin", None):
         try:
             await msg.delete()
@@ -205,12 +201,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== STARTUP HOOK (PTB 21.x: tránh truy cập bot khi chưa init) ======
+# ====== STARTUP HOOK ======
 async def on_startup(app: Application):
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
-    except Exception:
+        print("Bot ready as @", app.bot_data["contact"])
+    except Exception as e:
+        print("post_init error:", e)
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
 # ====== MAIN ======
@@ -227,7 +225,7 @@ def main():
 
     init_db()
 
-    # keepalive (Flask) để Render free không sleep quá lâu
+    # keepalive (Flask) cho Render free
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
@@ -236,30 +234,38 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init(on_startup)
 
-    # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("filter_add", filter_add))
-    app.add_handler(CommandHandler("filter_list", filter_list))
-    app.add_handler(CommandHandler("filter_del", filter_del))
-    app.add_handler(CommandHandler("antilink_on", antilink_on))
-    app.add_handler(CommandHandler("antilink_off", antilink_off))
-    app.add_handler(CommandHandler("antimention_on", antimention_on))
-    app.add_handler(CommandHandler("antimention_off", antimention_off))
-    app.add_handler(CommandHandler("antiforward_on", antiforward_on))
-    app.add_handler(CommandHandler("antiforward_off", antiforward_off))
-    app.add_handler(CommandHandler("setflood", setflood))
+    # --- HANDLER ORDER (group): 0 = cao nhất
+    # 1) Commands (ưu tiên)
+    app.add_handler(CommandHandler("start", start), group=0)
+    app.add_handler(CommandHandler("help", help_cmd), group=0)
+    app.add_handler(CommandHandler("filter_add", filter_add), group=0)
+    app.add_handler(CommandHandler("filter_list", filter_list), group=0)
+    app.add_handler(CommandHandler("filter_del", filter_del), group=0)
+    app.add_handler(CommandHandler("antilink_on", antilink_on), group=0)
+    app.add_handler(CommandHandler("antilink_off", antilink_off), group=0)
+    app.add_handler(CommandHandler("antimention_on", antimention_on), group=0)
+    app.add_handler(CommandHandler("antimention_off", antimention_off), group=0)
+    app.add_handler(CommandHandler("antiforward_on", antiforward_on), group=0)
+    app.add_handler(CommandHandler("antiforward_off", antiforward_off), group=0)
+    app.add_handler(CommandHandler("setflood", setflood), group=0)
 
-    # Pro handlers & scheduler
-    register_handlers(app)
+    # 2) Pro handlers (đặt sau commands)
+    register_handlers(app, group=1)
 
-    # Guard KHÔNG bắt command (để /help, /start không bị nuốt)
-    app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
+    # 3) Guard: KHÔNG bắt command & chạy sau cùng
+    app.add_handler(
+        MessageHandler((~filters.StatusUpdate.ALL) & (~filters.COMMAND), guard),
+        group=2
+    )
 
+    # Schedulers
     attach_scheduler(app)
 
     print("Bot started.")
-    app.run_polling(close_loop=False)
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        close_loop=False
+    )
 
 if __name__ == "__main__":
     main()
