@@ -9,21 +9,24 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
+# ===== DB =====
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist
-from pro.handlers import register_handlers
-from pro.scheduler import attach_scheduler
+# ===== PRO =====
+from pro.handlers import register_handlers       # <- đã chuẩn hoá chữ ký (xem mục 4)
+from pro.scheduler import attach_scheduler       # <- dùng PTB JobQueue
+# ===== Keepalive =====
 from keepalive import run as keepalive_run
 
-# ====== ENV ======
+# ===== ENV =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
-# ====== STATE ======
+# ===== STATE =====
 FLOOD = {}
 LINK_RE = re.compile(r"(https?://|t\.me/|@\w+)", re.IGNORECASE)
 
-# ====== HELPERS ======
+# ===== HELPERS =====
 def get_settings(chat_id: int) -> Setting:
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -40,11 +43,11 @@ def get_settings(chat_id: int) -> Setting:
         db.commit()
     return s
 
-# ====== COMMANDS ======
+# ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     await context.bot.send_message(
-        update.effective_chat.id,
-        "Xin chào! Gõ /help để xem lệnh."
+        chat_id, "Xin chào! Gõ /help để xem lệnh."
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -121,23 +124,7 @@ async def antimention_off(update, context): await toggle(update, "antimention", 
 async def antiforward_on(update, context):  await toggle(update, "antiforward", True,  "Anti-forward")
 async def antiforward_off(update, context): await toggle(update, "antiforward", False, "Anti-forward")
 
-async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Cú pháp: /setflood <số tin>")
-    try:
-        n = max(2, int(context.args[0]))
-    except ValueError:
-        return await update.message.reply_text("Giá trị không hợp lệ.")
-    db = SessionLocal()
-    s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
-    if not s:
-        s = Setting(chat_id=update.effective_chat.id)
-        db.add(s)
-    s.flood_limit = n
-    db.commit()
-    await update.message.reply_text(f"✅ Flood limit = {n}")
-
-# ====== GUARD ======
+# ===== GUARD =====
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
@@ -161,7 +148,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-    # anti forward (PTB 21.x -> forward_origin)
+    # anti forward (PTB 21.x: forward_origin)
     if s.antiforward and getattr(msg, "forward_origin", None):
         try:
             await msg.delete()
@@ -206,35 +193,45 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== error log ======
+# ===== error log =====
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     try:
         print("ERROR:", repr(context.error))
     except Exception:
         pass
 
-# ====== startup hook ======
+# ===== startup hook =====
 async def on_startup(app: Application):
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
+    app.bot_data["owner_id"] = OWNER_ID
 
-# ====== MAIN ======
+# ===== MAIN =====
 def main():
     if not BOT_TOKEN:
         raise SystemExit("Missing BOT_TOKEN")
 
+    print("PTB boot — token len:", len(BOT_TOKEN), "prefix:", BOT_TOKEN[:10], "…")
+    try:
+        from telegram import __version__ as _ptb_ver
+        print("PTB version =", _ptb_ver)
+    except Exception:
+        pass
+
     init_db()
 
-    # Keepalive (Flask) để Render Free không timeout
+    # Keepalive (Flask) cho Render Free
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
         pass
 
     app = Application.builder().token(BOT_TOKEN).build()
+
+    # PTB 21.x: post_init là thuộc tính callback
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
@@ -252,9 +249,9 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # Pro features
-    register_handlers(app, owner_id=OWNER_ID)
-    attach_scheduler(app)
+    # PRO features
+    register_handlers(app)           # <- KHÔNG truyền owner_id nữa
+    attach_scheduler(app)            # <- dùng JobQueue của PTB
 
     # Guard: KHÔNG bắt command
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
