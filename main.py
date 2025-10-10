@@ -104,7 +104,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
-    if s.antiforward and (msg.forward_date or getattr(msg, "forward_origin", None)):
+    if s.antiforward and getattr(msg, "forward_origin", None):
         try: await msg.delete()
         except Exception: pass
         return
