@@ -9,7 +9,6 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
-# ====== MODULES TRONG PROJECT CỦA BẠN ======
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist
 from pro.handlers import register_handlers
 from pro.scheduler import attach_scheduler
@@ -22,9 +21,9 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
 # ====== STATE ======
 FLOOD = {}
-LINK_RE = re.compile(r"(https?://|t\.me/|@\w+)")
+LINK_RE = re.compile(r"(https?://|t\.me/|@\w+)", re.IGNORECASE)
 
-# ====== DB HELPERS ======
+# ====== HELPERS ======
 def get_settings(chat_id: int) -> Setting:
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -43,25 +42,28 @@ def get_settings(chat_id: int) -> Setting:
 
 # ====== COMMANDS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
+    chat_id = update.effective_chat.id
+    await context.bot.send_message(
+        chat_id,
+        "Xin chào! Gõ /help để xem lệnh."
+    )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Dùng HTML an toàn (Telegram chỉ hỗ trợ: b, i, u, s, code, pre, a)
     txt = (
-        "<b>HotroSecurityBot – Full</b>\n\n"
+        "<b>HotroSecurityBot – Free + Pro</b>\n\n"
         "<b>FREE</b>\n"
-        "/filter_add <code>@spam</code> – thêm từ khoá chặn\n"
+        "/filter_add <từ> – thêm từ khoá chặn\n"
         "/filter_list – xem danh sách từ khoá\n"
-        "/filter_del <code>ID</code> – xoá filter theo ID\n"
+        "/filter_del <id> – xoá filter theo ID\n"
         "/antilink_on | /antilink_off\n"
         "/antimention_on | /antimention_off\n"
         "/antiforward_on | /antiforward_off\n"
-        "/setflood <code>n</code> – giới hạn spam (mặc định 3)\n\n"
+        "/setflood <n> – giới hạn spam (mặc định 3)\n\n"
         "<b>PRO</b>\n"
-        "/pro – bảng dùng thử / nhập key\n"
-        "/redeem <code>key</code> – kích hoạt\n"
-        "/genkey <code>days</code> – (OWNER) sinh key\n"
-        "/wl_add <code>domain</code> | /wl_del <code>domain</code> | /wl_list\n"
+        "/pro – bảng dùng thử/nhập key\n"
+        "/redeem <key> – kích hoạt Pro\n"
+        "/genkey <days> – (OWNER) sinh key\n"
+        "/wl_add <domain> | /wl_del <domain> | /wl_list – whitelist link\n"
         "/captcha_on | /captcha_off – bật/tắt captcha join\n"
     )
     await context.bot.send_message(update.effective_chat.id, txt, parse_mode="HTML")
@@ -69,9 +71,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text(
-            "Cú pháp: <code>/filter_add @spam</code>", parse_mode="HTML"
+            "Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML"
         )
-    pattern = " ".join(context.args)
+    pattern = " ".join(context.args).strip()
+    if not pattern:
+        return await update.message.reply_text("Từ khoá rỗng.")
     db = SessionLocal()
     f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
     db.add(f); db.commit()
@@ -90,7 +94,10 @@ async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text("Cú pháp: /filter_del <id>")
-    fid = int(context.args[0])
+    try:
+        fid = int(context.args[0])
+    except ValueError:
+        return await update.message.reply_text("ID không hợp lệ.")
     db = SessionLocal()
     it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
     if not it:
@@ -104,35 +111,40 @@ async def toggle(update: Update, field: str, val: bool, label: str):
     if not s:
         s = Setting(chat_id=update.effective_chat.id)
         db.add(s)
-    setattr(s, field, val); db.commit()
+    setattr(s, field, val)
+    db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
-async def antilink_on(update, context):    await toggle(update, "antilink",    True,  "Anti-link")
-async def antilink_off(update, context):   await toggle(update, "antilink",    False, "Anti-link")
-async def antimention_on(update, context): await toggle(update, "antimention", True,  "Anti-mention")
-async def antimention_off(update, context):await toggle(update, "antimention", False, "Anti-mention")
-async def antiforward_on(update, context): await toggle(update, "antiforward", True,  "Anti-forward")
-async def antiforward_off(update, context):await toggle(update, "antiforward", False, "Anti-forward")
+async def antilink_on(update, context):     await toggle(update, "antilink", True,  "Anti-link")
+async def antilink_off(update, context):    await toggle(update, "antilink", False, "Anti-link")
+async def antimention_on(update, context):  await toggle(update, "antimention", True,  "Anti-mention")
+async def antimention_off(update, context): await toggle(update, "antimention", False, "Anti-mention")
+async def antiforward_on(update, context):  await toggle(update, "antiforward", True,  "Anti-forward")
+async def antiforward_off(update, context): await toggle(update, "antiforward", False, "Anti-forward")
 
 async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text("Cú pháp: /setflood <số tin>")
-    n = max(2, int(context.args[0]))
+    try:
+        n = max(2, int(context.args[0]))
+    except ValueError:
+        return await update.message.reply_text("Giá trị không hợp lệ.")
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
     if not s:
         s = Setting(chat_id=update.effective_chat.id)
         db.add(s)
-    s.flood_limit = n; db.commit()
+    s.flood_limit = n
+    db.commit()
     await update.message.reply_text(f"✅ Flood limit = {n}")
 
-# ====== GUARD (anti spam/link/mention/forward) ======
+# ====== GUARD ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
 
-    # Không bắt các lệnh để tránh nuốt /start, /help...
+    # Không xử lý commands để tránh nuốt /start, /help,...
     if msg.text and msg.text.startswith("/"):
         return
 
@@ -142,35 +154,43 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
-    # Keyword filters
+    # keyword filters
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern.lower() in text.lower():
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
 
-    # Anti-forward (PTB 21.x: dùng forward_origin)
+    # anti forward
     if s.antiforward and getattr(msg, "forward_origin", None):
-        try: await msg.delete()
-        except Exception: pass
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
 
-    # Anti-link + whitelist
+    # anti link + whitelist
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         allowed = any(d and d.lower() in text.lower() for d in wl)
         if not allowed:
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
 
-    # Anti-mention
+    # anti mention
     if s.antimention and "@" in text:
-        try: await msg.delete()
-        except Exception: pass
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
 
-    # Anti-flood
+    # anti flood
     key = (chat_id, msg.from_user.id)
     now = datetime.now().timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
@@ -188,20 +208,20 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== STARTUP HOOK ======
+# ====== error log (để log ra console thay vì crash) ======
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        print("ERROR:", repr(context.error))
+    except Exception:
+        pass
+
+# ====== startup hook ======
 async def on_startup(app: Application):
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
-
-# ====== ERROR LOGGER (tránh crash & dễ debug) ======
-async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        print("Unhandled error:", context.error)
-    except Exception:
-        pass
 
 # ====== MAIN ======
 def main():
@@ -217,14 +237,16 @@ def main():
 
     init_db()
 
-    # Flask keepalive để Render free đỡ sleep
+    # Keepalive (Flask) để Render free không ngủ quá lâu
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
         pass
 
     app = Application.builder().token(BOT_TOKEN).build()
-    app.post_init(on_startup)
+
+    # Gán đúng kiểu (PTB 21.x): post_init là callback attribute, không phải callable
+    app.post_init = on_startup
     app.add_error_handler(on_error)
 
     # Commands
@@ -241,15 +263,15 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # Phần Pro & lịch
+    # Pro features
     register_handlers(app)
     attach_scheduler(app)
 
-    # Guard KHÔNG bắt command
+    # Guard: KHÔNG bắt command
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("Bot started.")
-    app.run_polling(close_loop=False)
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
