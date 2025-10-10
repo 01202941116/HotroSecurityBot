@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 import os
@@ -9,14 +9,14 @@ engine = create_engine(DB_URL, future=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 Base = declarative_base()
 
+# ===== Entities =====
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True)            # telegram user id
     username = Column(String, nullable=True)
     is_pro = Column(Boolean, default=False)
     pro_expires_at = Column(DateTime, nullable=True)
-
 
 class LicenseKey(Base):
     __tablename__ = "license_keys"
@@ -28,7 +28,6 @@ class LicenseKey(Base):
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-
 class Trial(Base):
     __tablename__ = "trials"
     id = Column(Integer, primary_key=True)
@@ -37,31 +36,29 @@ class Trial(Base):
     expires_at = Column(DateTime)
     active = Column(Boolean, default=True)
 
-
 class Filter(Base):
     __tablename__ = "filters"
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, index=True)
     pattern = Column(String, index=True)
 
-
 class Setting(Base):
     __tablename__ = "settings"
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, unique=True, index=True)
-    antilink = Column(Boolean, default=False)
+    antilink = Column(Boolean, default=True)
     antimention = Column(Boolean, default=True)
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
     flood_mode = Column(String, default="mute")
-
+    # Gợi ý: nếu cần captcha thật, thêm cột captcha=Column(Boolean, default=False)
+    # và migrate DB sau.
 
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, index=True)
     domain = Column(String, index=True)
-
 
 class Captcha(Base):
     __tablename__ = "captcha"
@@ -71,6 +68,13 @@ class Captcha(Base):
     answer = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+# ===== Utils =====
 
 def init_db():
     Base.metadata.create_all(engine)
+
+def now_utc():
+    return datetime.utcnow()
+
+def add_days(d: int):
+    return now_utc() + timedelta(days=d)
