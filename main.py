@@ -46,7 +46,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/wl_add <domain> | /wl_del <domain> | /wl_list – whitelist link\n"
         "/captcha_on | /captcha_off – bật/tắt captcha join\n"
     )
-    await update.message.reply_text(txt, parse_mode="HTML")
+
+    # Đảm bảo luôn trả lời đúng cách dù update.message = None
+    if update.message:
+        await update.message.reply_text(txt, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(txt, parse_mode="HTML")
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=txt, parse_mode="HTML")
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
