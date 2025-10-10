@@ -1,12 +1,33 @@
-from telegram.ext import CommandHandler, ContextTypes
+from datetime import datetime, timedelta
 from telegram import Update
+from telegram.ext import ContextTypes
+from core.models import SessionLocal, License
 
-async def pro_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = context.bot_data.get("contact") or "admin"
-    await update.message.reply_text(
-        f"Gói PRO: dùng thử 7 ngày (/trial) hoặc nhập key /redeem <key>\nLiên hệ @{contact} để mua key."
+# ===== DÙNG THỬ 7 NGÀY =====
+async def trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    db = SessionLocal()
+
+    # kiểm tra nếu đã kích hoạt key dùng thử trước đó
+    old = db.query(License).filter_by(user_id=user_id, key_type="trial").one_or_none()
+    if old:
+        return await update.message.reply_text("⚠️ Bạn đã từng dùng thử miễn phí trước đó, không thể kích hoạt lại.")
+
+    # tạo key mới dùng thử 7 ngày
+    expires = datetime.utcnow() + timedelta(days=7)
+    trial_key = f"trial-{user_id}-{int(datetime.utcnow().timestamp())}"
+
+    lic = License(
+        user_id=user_id,
+        key=trial_key,
+        key_type="trial",
+        expires=expires,
+        activated=True,
     )
+    db.add(lic)
+    db.commit()
 
-def register_handlers(app):
-    # Không truy cập app.bot trước khi bot được khởi tạo
-    app.add_handler(CommandHandler("pro", pro_panel))
+    await update.message.reply_text(
+        f"✅ Gói PRO dùng thử đã được kích hoạt!\nHiệu lực đến: {expires.strftime('%d/%m/%Y %H:%M:%S UTC')}\n"
+        "Cảm ơn bạn đã trải nghiệm HotroSecurityBot 💙"
+    )
