@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
-from core.models import SessionLocal, License
+from core.models import SessionLocal, User, LicenseKey, Trial, Setting, Filter, Whitelist
+# tùy file bạn đang dùng entity nào, nhưng đặc biệt phải thay License -> LicenseKey
 
 # ===== DÙNG THỬ 7 NGÀY =====
 async def trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
