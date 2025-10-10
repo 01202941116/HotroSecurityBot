@@ -1,3 +1,5 @@
+import sys
+sys.modules.pop("core.models", None)
 from core.models import init_db
 
 def main():
