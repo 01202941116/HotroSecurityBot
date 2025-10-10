@@ -42,7 +42,10 @@ def get_settings(chat_id: int) -> Setting:
 
 # ====== COMMANDS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
+    await context.bot.send_message(
+        update.effective_chat.id,
+        "Xin chào! Gõ /help để xem lệnh."
+    )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -57,24 +60,27 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/setflood &lt;n&gt; – giới hạn spam (mặc định 3)\n\n"
         "<b>PRO</b>\n"
         "/pro – bảng dùng thử / nhập key\n"
-        "/trial – kích hoạt dùng thử 7 ngày\n"
         "/redeem &lt;key&gt; – kích hoạt\n"
         "/genkey &lt;days&gt; – (OWNER) sinh key\n"
         "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n"
-        "/captcha_on | /captcha_off – bật/tắt captcha join (placeholder)\n"
+        "/captcha_on | /captcha_off – bật/tắt captcha join\n"
     )
     await context.bot.send_message(update.effective_chat.id, txt, parse_mode="HTML")
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML")
+        return await update.message.reply_text(
+            "Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML"
+        )
     pattern = " ".join(context.args).strip()
     if not pattern:
         return await update.message.reply_text("Từ khoá rỗng.")
     db = SessionLocal()
     f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
     db.add(f); db.commit()
-    await update.message.reply_text(f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML"
+    )
 
 async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
@@ -136,8 +142,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
-
-    # Đừng ăn lệnh
+    # Đừng “nuốt” command
     if msg.text and msg.text.startswith("/"):
         return
 
@@ -150,14 +155,18 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # keyword filters
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern.lower() in text.lower():
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
 
-    # anti forward
+    # anti forward (PTB 21.x -> forward_origin)
     if s.antiforward and getattr(msg, "forward_origin", None):
-        try: await msg.delete()
-        except Exception: pass
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
 
     # anti link + whitelist
@@ -165,18 +174,93 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         allowed = any(d and d.lower() in text.lower() for d in wl)
         if not allowed:
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
 
     # anti mention
     if s.antimention and "@" in text:
-        try: await msg.delete()
-        except Exception: pass
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
 
     # anti flood
     key = (chat_id, msg.from_user.id)
     now = datetime.now().timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
-    bucket.append(now); FLOOD[key] =
+    bucket.append(now)
+    FLOOD[key] = bucket
+    if len(bucket) > s.flood_limit and s.flood_mode == "mute":
+        try:
+            until = datetime.now() + timedelta(minutes=5)
+            await context.bot.restrict_chat_member(
+                chat_id,
+                msg.from_user.id,
+                ChatPermissions(can_send_messages=False),
+                until_date=until,
+            )
+        except Exception:
+            pass
+
+# ====== error log ======
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        print("ERROR:", repr(context.error))
+    except Exception:
+        pass
+
+# ====== startup hook ======
+async def on_startup(app: Application):
+    try:
+        me = await app.bot.get_me()
+        app.bot_data["contact"] = me.username or CONTACT_USERNAME
+    except Exception:
+        app.bot_data["contact"] = CONTACT_USERNAME or "admin"
+
+# ====== MAIN ======
+def main():
+    if not BOT_TOKEN:
+        raise SystemExit("Missing BOT_TOKEN")
+
+    init_db()
+
+    # Keepalive (Flask) để Render Free không timeout
+    try:
+        threading.Thread(target=keepalive_run, daemon=True).start()
+    except Exception:
+        pass
+
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.post_init = on_startup
+    app.add_error_handler(on_error)
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("filter_add", filter_add))
+    app.add_handler(CommandHandler("filter_list", filter_list))
+    app.add_handler(CommandHandler("filter_del", filter_del))
+    app.add_handler(CommandHandler("antilink_on", antilink_on))
+    app.add_handler(CommandHandler("antilink_off", antilink_off))
+    app.add_handler(CommandHandler("antimention_on", antimention_on))
+    app.add_handler(CommandHandler("antimention_off", antimention_off))
+    app.add_handler(CommandHandler("antiforward_on", antiforward_on))
+    app.add_handler(CommandHandler("antiforward_off", antiforward_off))
+    app.add_handler(CommandHandler("setflood", setflood))
+
+    # Pro features
+    register_handlers(app, owner_id=OWNER_ID)
+    attach_scheduler(app)
+
+    # Guard: KHÔNG bắt command
+    app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
+
+    print("Bot started.")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
