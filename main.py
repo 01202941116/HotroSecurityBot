@@ -1,12 +1,6 @@
 import sys
-sys.modules.pop("core.models", None)
-from core.models import init_db
+sys.modules.pop("core.models", None)  # đảm bảo không bị import vòng
 
-def main():
-    init_db()
-
-    from core.models import SessionLocal, User  # import sau khi DB đã tạo
-    ...
 import os
 import re
 import threading
@@ -18,10 +12,23 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
+# ====== LOCAL IMPORTS ======
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist
-from pro.handlers import register_handlers
-from pro.scheduler import attach_scheduler
-from keepalive import run as keepalive_run
+try:
+    # pro.handlers có thể bị lỗi nếu chưa có hàm register_handlers
+    from pro.handlers import register_handlers
+except ImportError:
+    register_handlers = lambda app: print("⚠️ Chưa có pro.handlers hoặc chưa có register_handlers(app). Bỏ qua.")
+
+try:
+    from pro.scheduler import attach_scheduler
+except ImportError:
+    attach_scheduler = lambda app: print("⚠️ Chưa có pro.scheduler. Bỏ qua scheduler.")
+
+try:
+    from keepalive import run as keepalive_run
+except ImportError:
+    keepalive_run = lambda: print("⚠️ Chưa có keepalive.py. Bỏ qua keepalive.")
 
 # ====== ENV ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -49,6 +56,7 @@ def get_settings(chat_id: int) -> Setting:
         db.commit()
     return s
 
+
 # ====== COMMANDS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -56,6 +64,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id,
         "Xin chào! Gõ /help để xem lệnh."
     )
+
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -73,12 +82,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/redeem &lt;key&gt; – kích hoạt\n"
         "/genkey &lt;days&gt; – (OWNER) sinh key\n"
         "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n"
-        "/captcha_on | /captcha_off – bật/tắt captcha join\n"
+        "/captcha_on | /captcha_off – bật/tắt captcha join\n\n"
+        f"Liên hệ <a href='https://t.me/{CONTACT_USERNAME or 'HotroSecurity_Bot'}'>@{CONTACT_USERNAME or 'HotroSecurity_Bot'}</a> để mua key PRO."
     )
 
-    # gửi an toàn dù update.message có thể None
     chat_id = update.effective_chat.id
     await context.bot.send_message(chat_id, txt, parse_mode="HTML")
+
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -90,10 +100,12 @@ async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Từ khoá rỗng.")
     db = SessionLocal()
     f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
-    db.add(f); db.commit()
+    db.add(f)
+    db.commit()
     await update.message.reply_text(
         f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML"
     )
+
 
 async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
@@ -102,6 +114,7 @@ async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Danh sách filter trống.")
     out = ["<b>Filters:</b>"] + [f"{i.id}. <code>{i.pattern}</code>" for i in items]
     await update.message.reply_text("\n".join(out), parse_mode="HTML")
+
 
 async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -114,8 +127,10 @@ async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
     if not it:
         return await update.message.reply_text("Không tìm thấy ID.")
-    db.delete(it); db.commit()
+    db.delete(it)
+    db.commit()
     await update.message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
+
 
 async def toggle(update: Update, field: str, val: bool, label: str):
     db = SessionLocal()
@@ -127,12 +142,14 @@ async def toggle(update: Update, field: str, val: bool, label: str):
     db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
-async def antilink_on(update, context):     await toggle(update, "antilink", True,  "Anti-link")
-async def antilink_off(update, context):    await toggle(update, "antilink", False, "Anti-link")
-async def antimention_on(update, context):  await toggle(update, "antimention", True,  "Anti-mention")
+
+async def antilink_on(update, context): await toggle(update, "antilink", True, "Anti-link")
+async def antilink_off(update, context): await toggle(update, "antilink", False, "Anti-link")
+async def antimention_on(update, context): await toggle(update, "antimention", True, "Anti-mention")
 async def antimention_off(update, context): await toggle(update, "antimention", False, "Anti-mention")
-async def antiforward_on(update, context):  await toggle(update, "antiforward", True,  "Anti-forward")
+async def antiforward_on(update, context): await toggle(update, "antiforward", True, "Anti-forward")
 async def antiforward_off(update, context): await toggle(update, "antiforward", False, "Anti-forward")
+
 
 async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -150,19 +167,15 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.commit()
     await update.message.reply_text(f"✅ Flood limit = {n}")
 
+
 # ====== GUARD ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    if not msg:
-        return
-
-    # Không xử lý commands để tránh nuốt /start, /help,...
-    if msg.text and msg.text.startswith("/"):
+    if not msg or (msg.text and msg.text.startswith("/")):
         return
 
     chat_id = update.effective_chat.id
     text = (msg.text or msg.caption or "")
-
     db = SessionLocal()
     s = get_settings(chat_id)
 
@@ -220,12 +233,11 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== error log (để log ra console thay vì crash) ======
+
+# ====== error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        print("ERROR:", repr(context.error))
-    except Exception:
-        pass
+    print("ERROR:", repr(context.error))
+
 
 # ====== startup hook ======
 async def on_startup(app: Application):
@@ -235,33 +247,27 @@ async def on_startup(app: Application):
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
+
 # ====== MAIN ======
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("Missing BOT_TOKEN")
+        raise SystemExit("❌ Missing BOT_TOKEN environment variable!")
 
-    print("PTB boot — token len:", len(BOT_TOKEN), "prefix:", BOT_TOKEN[:10], "…")
-    try:
-        from telegram import __version__ as _ptb_ver
-        print("PTB version =", _ptb_ver)
-    except Exception:
-        pass
+    print(f"PTB boot — token prefix: {BOT_TOKEN[:10]}…")
 
     init_db()
 
-    # Keepalive (Flask) để Render free không ngủ quá lâu
+    # keepalive thread
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
         pass
 
     app = Application.builder().token(BOT_TOKEN).build()
-
-    # Gán đúng kiểu (PTB 21.x): post_init là callback attribute, không phải callable
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # Commands
+    # basic commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -275,15 +281,16 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # Pro features
+    # pro features
     register_handlers(app)
     attach_scheduler(app)
 
-    # Guard: KHÔNG bắt command
+    # guard non-command messages
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
-    print("Bot started.")
+    print("✅ Bot started and polling.")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
