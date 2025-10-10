@@ -1,37 +1,34 @@
 # pro/scheduler.py
-from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime, timedelta
+from telegram.ext import Application
 
-def _cleanup_job():
-    from core.models import SessionLocal, User, Trial
-    db = SessionLocal()
-    try:
-        # Tắt PRO đã hết hạn
-        us = db.query(User).all()
-        changed = 0
-        for u in us:
-            if u.is_pro and (not u.pro_expires_at or u.pro_expires_at <= datetime.utcnow()):
-                u.is_pro = False
-                changed += 1
-        if changed:
+# Gắn các job nền bằng JobQueue có sẵn của PTB (không cần apscheduler)
+def attach_scheduler(app: Application):
+    jq = app.job_queue
+
+    # Ping keepalive 5 phút/lần để Render free đỡ ngủ (nếu bạn có flask keepalive thì có thể bỏ)
+    async def _ping_keepalive(_):
+        try:
+            import os, requests
+            url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("KEEPALIVE_URL")
+            if url:
+                requests.get(url, timeout=5)
+        except Exception:
+            pass
+
+    # Kiểm tra hết hạn trial / pro mỗi 30 phút (ví dụ)
+    async def _check_expiry(_):
+        try:
+            from core.models import SessionLocal, User
+            now = datetime.utcnow()
+            db = SessionLocal()
+            for u in db.query(User).filter(User.pro_expires_at != None).all():  # noqa: E711
+                if u.pro_expires_at <= now:
+                    u.is_pro = False
+                    u.pro_expires_at = None
             db.commit()
+        except Exception:
+            pass
 
-        # Tắt Trial hết hạn
-        trials = db.query(Trial).filter_by(active=True).all()
-        for t in trials:
-            if t.expires_at and t.expires_at <= datetime.utcnow():
-                t.active = False
-        db.commit()
-    finally:
-        db.close()
-
-_sched = None
-
-def attach_scheduler(app):
-    global _sched
-    if _sched:
-        return
-    _sched = BackgroundScheduler(timezone="UTC")
-    # chạy mỗi 15 phút
-    _sched.add_job(_cleanup_job, "interval", minutes=15, id="pro_cleanup", replace_existing=True)
-    _sched.start()
+    jq.run_repeating(_ping_keepalive, interval=5*60, first=10)
+    jq.run_repeating(_check_expiry,  interval=30*60, first=30)
