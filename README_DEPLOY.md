@@ -1,17 +1,16 @@
+# HotroSecurityBot (PTB v21)
 
-# HotroSecurityBot — Render Ready
+## Biến môi trường (Render → Environment)
+- BOT_TOKEN = <token Telegram BotFather>
+- OWNER_ID  = <Telegram user id của bạn>
+- CONTACT_USERNAME = <username support, không có @>
+- LICENSE_DB_URL (tùy chọn) = sqlite:///licenses.db  (mặc định)
+- PORT = 10000  (Render sẽ tự set, không cần nếu đã có)
 
-## Env
-- BOT_TOKEN=<token bot từ BotFather>
-- OWNER_ID=<telegram user id>
-- CONTACT_USERNAME=<username liên hệ>
+## Build/Start command
+Build: `pip install -r requirements.txt`
+Start: `python main.py`
 
-## Build Command
-pip uninstall -y telegram || true && pip install --no-cache-dir -r requirements.txt
-
-## Start Command
-python main.py
-
-## Notes
-- `runtime.txt` pins Python 3.12.5 (PTB 20.7 ổn định trên 3.12).
-- Nếu dùng Background Worker: cũng dùng Start `python main.py`.
+## Ghi chú
+- Dịch vụ là Web Service (không phải Background) để giữ sống bằng Flask.
+- Free instance có thể sleep; keepalive giúp Render ping đường dẫn gốc.
