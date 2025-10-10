@@ -31,7 +31,7 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
 # ===== STATE =====
 FLOOD = {}
-LINK_RE = re.compile(r"(https?://|t\.me/|@\w+)", re.IGNORECASE)
+LINK_RE = re.compile(r"(https?://|http://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info)(/[^\s]*)?)", re.IGNORECASE)
 
 # ===== Helpers =====
 def get_settings(chat_id: int) -> Setting:
