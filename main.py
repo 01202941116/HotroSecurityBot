@@ -1,3 +1,6 @@
+from keepalive import start_keepalive
+...
+start_keepalive()
 import os
 import re
 import threading
