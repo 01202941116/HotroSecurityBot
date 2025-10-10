@@ -1,7 +1,7 @@
-# main.py
 import os
 import re
 import threading
+import logging
 from datetime import datetime, timedelta
 
 from telegram import Update, ChatPermissions
@@ -19,6 +19,13 @@ from keepalive import run as keepalive_run
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
+
+# ====== LOGGING ======
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+)
+log = logging.getLogger("main")
 
 # ====== STATE ======
 FLOOD = {}
@@ -43,8 +50,7 @@ def get_settings(chat_id: int) -> Setting:
 
 # ====== COMMANDS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    await context.bot.send_message(chat_id, "Xin chào! Gõ /help để xem lệnh.")
+    await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -110,8 +116,8 @@ async def toggle(update: Update, field: str, val: bool, label: str):
     db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
-async def antilink_on(update, context):    await toggle(update, "antilink",    True,  "Anti-link")
-async def antilink_off(update, context):   await toggle(update, "antilink",    False, "Anti-link")
+async def antilink_on(update, context):    await toggle(update, "antilink", True,  "Anti-link")
+async def antilink_off(update, context):   await toggle(update, "antilink", False, "Anti-link")
 async def antimention_on(update, context): await toggle(update, "antimention", True,  "Anti-mention")
 async def antimention_off(update, context):await toggle(update, "antimention", False, "Anti-mention")
 async def antiforward_on(update, context): await toggle(update, "antiforward", True,  "Anti-forward")
@@ -130,14 +136,14 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.commit()
     await update.message.reply_text(f"✅ Flood limit = {n}")
 
-# ====== GUARD (anti spam/link/mention/forward) ======
+# ====== GUARD ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
 
-    # Tuyệt đối không xử lý command
-    if (msg.text and msg.text.startswith("/")) or (msg.entities and any(e.type == "bot_command" for e in msg.entities)):
+    # Không bắt command để /start, /help chạy bình thường
+    if msg.text and msg.text.startswith("/"):
         return
 
     chat_id = update.effective_chat.id
@@ -155,7 +161,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-    # anti forward (PTB 21.x)
+    # anti forward (PTB 21.x dùng forward_origin)
     if s.antiforward and getattr(msg, "forward_origin", None):
         try:
             await msg.delete()
@@ -163,7 +169,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    # anti link với whitelist
+    # anti link + whitelist
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         allowed = any(d and d.lower() in text.lower() for d in wl)
@@ -185,8 +191,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # anti flood
     key = (chat_id, msg.from_user.id)
     now = datetime.now().timestamp()
-    bucket = FLOOD.get(key, [])
-    bucket = [t for t in bucket if now - t < 10]
+    bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
     bucket.append(now)
     FLOOD[key] = bucket
     if len(bucket) > s.flood_limit and s.flood_mode == "mute":
@@ -201,71 +206,68 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ====== STARTUP HOOK ======
+# ====== STARTUP HOOK (PTB 21.x) ======
 async def on_startup(app: Application):
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
-        print("Bot ready as @", app.bot_data["contact"])
-    except Exception as e:
-        print("post_init error:", e)
+    except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
+    log.info("Bot ready as @%s", app.bot_data["contact"])
+
+# ====== ERROR LOG ======
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("Unhandled error while handling update: %s", update)
 
 # ====== MAIN ======
 def main():
     if not BOT_TOKEN:
         raise SystemExit("Missing BOT_TOKEN")
 
-    print("PTB boot — token len:", len(BOT_TOKEN), "prefix:", BOT_TOKEN[:10], "…")
-    try:
-        from telegram import __version__ as _ptb_ver
-        print("PTB version =", _ptb_ver)
-    except Exception:
-        pass
+    from telegram import __version__ as _ptb_ver
+    log.info("PTB boot — token len: %s prefix: %s… ; PTB=%s",
+             len(BOT_TOKEN), BOT_TOKEN[:10], _ptb_ver)
 
     init_db()
 
-    # keepalive (Flask) cho Render free
+    # keepalive (Flask) để Render free không sleep quá lâu
     try:
         threading.Thread(target=keepalive_run, daemon=True).start()
     except Exception:
-        pass
+        log.warning("keepalive thread could not start", exc_info=True)
 
     app = Application.builder().token(BOT_TOKEN).build()
-    app.post_init(on_startup)
 
-    # --- HANDLER ORDER (group): 0 = cao nhất
-    # 1) Commands (ưu tiên)
-    app.add_handler(CommandHandler("start", start), group=0)
-    app.add_handler(CommandHandler("help", help_cmd), group=0)
-    app.add_handler(CommandHandler("filter_add", filter_add), group=0)
-    app.add_handler(CommandHandler("filter_list", filter_list), group=0)
-    app.add_handler(CommandHandler("filter_del", filter_del), group=0)
-    app.add_handler(CommandHandler("antilink_on", antilink_on), group=0)
-    app.add_handler(CommandHandler("antilink_off", antilink_off), group=0)
-    app.add_handler(CommandHandler("antimention_on", antimention_on), group=0)
-    app.add_handler(CommandHandler("antimention_off", antimention_off), group=0)
-    app.add_handler(CommandHandler("antiforward_on", antiforward_on), group=0)
-    app.add_handler(CommandHandler("antiforward_off", antiforward_off), group=0)
-    app.add_handler(CommandHandler("setflood", setflood), group=0)
+    # Gắn startup hook ĐÚNG CÁCH (PTB 21.x):
+    app.post_init = on_startup
 
-    # 2) Pro handlers (đặt sau commands)
-    register_handlers(app, group=1)
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("filter_add", filter_add))
+    app.add_handler(CommandHandler("filter_list", filter_list))
+    app.add_handler(CommandHandler("filter_del", filter_del))
+    app.add_handler(CommandHandler("antilink_on", antilink_on))
+    app.add_handler(CommandHandler("antilink_off", antilink_off))
+    app.add_handler(CommandHandler("antimention_on", antimention_on))
+    app.add_handler(CommandHandler("antimention_off", antimention_off))
+    app.add_handler(CommandHandler("antiforward_on", antiforward_on))
+    app.add_handler(CommandHandler("antiforward_off", antiforward_off))
+    app.add_handler(CommandHandler("setflood", setflood))
 
-    # 3) Guard: KHÔNG bắt command & chạy sau cùng
-    app.add_handler(
-        MessageHandler((~filters.StatusUpdate.ALL) & (~filters.COMMAND), guard),
-        group=2
-    )
+    # Pro handlers & scheduler
+    register_handlers(app)
 
-    # Schedulers
+    # Guard KHÔNG bắt command
+    app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
+
     attach_scheduler(app)
 
-    print("Bot started.")
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        close_loop=False
-    )
+    # Error log
+    app.add_error_handler(on_error)
+
+    log.info("Bot starting polling…")
+    app.run_polling()   # <-- Không truyền close_loop ở PTB 21.x
 
 if __name__ == "__main__":
     main()
