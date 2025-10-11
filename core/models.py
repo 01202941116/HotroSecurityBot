@@ -67,6 +67,17 @@ class Captcha(Base):
     user_id = Column(Integer, index=True)
     answer = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+   
+# ====== Warning Table ======
+from sqlalchemy import func
+
+class Warning(Base):
+    __tablename__ = "warnings"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger)
+    user_id = Column(BigInteger)
+    count = Column(Integer, default=0)
+    last_warned = Column(DateTime, default=func.now())
 
 # ===== Utils =====
 
