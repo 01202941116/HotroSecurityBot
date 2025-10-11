@@ -124,6 +124,75 @@ def register_handlers(app: Application, owner_id: int | None = None):
     # owner genkey
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
     # whitelist
+    async def _admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    try:
+        m = await context.bot.get_chat_member(chat_id, user_id)
+        return m.status in ("administrator", "creator")
+    except Exception:
+        return False
+
+async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_only(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+    db = SessionLocal()
+    s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+    if not s:
+        s = PromoSetting(chat_id=update.effective_chat.id, enabled=True)
+        db.add(s)
+    else:
+        s.enabled = True
+    db.commit(); db.close()
+    await update.message.reply_text("✅ Đã bật quảng cáo tự động cho nhóm này.")
+
+async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_only(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+    db = SessionLocal()
+    s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+    if not s:
+        s = PromoSetting(chat_id=update.effective_chat.id, enabled=False)
+        db.add(s)
+    else:
+        s.enabled = False
+    db.commit(); db.close()
+    await update.message.reply_text("⛔️ Đã tắt quảng cáo tự động cho nhóm này.")
+
+async def ad_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_only(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+    text = " ".join(context.args).strip()
+    if not text:
+        return await update.message.reply_text("Cú pháp: /ad_set <nội dung>")
+    db = SessionLocal()
+    s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+    if not s:
+        s = PromoSetting(chat_id=update.effective_chat.id, enabled=True, text=text)
+        db.add(s)
+    else:
+        s.text = text
+    db.commit(); db.close()
+    await update.message.reply_text("📝 Đã cập nhật nội dung quảng cáo.")
+
+async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_only(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /ad_interval <phút>")
+    try:
+        minutes = max(10, int(context.args[0]))
+    except ValueError:
+        return await update.message.reply_text("Giá trị không hợp lệ.")
+    db = SessionLocal()
+    s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+    if not s:
+        s = PromoSetting(chat_id=update.effective_chat.id, enabled=True, interval_min=minutes)
+        db.add(s)
+    else:
+        s.interval_min = minutes
+    db.commit(); db.close()
+    await update.message.reply_text(f"⏱ Chu kỳ quảng cáo: {minutes} phút.")
     app.add_handler(CommandHandler("wl_add", wl_add))
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
