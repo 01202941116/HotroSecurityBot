@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import (
+    create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
+    BigInteger, func  # <-- thêm BigInteger, func vào đây
+)
 from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 
@@ -51,8 +54,6 @@ class Setting(Base):
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
     flood_mode = Column(String, default="mute")
-    # Gợi ý: nếu cần captcha thật, thêm cột captcha=Column(Boolean, default=False)
-    # và migrate DB sau.
 
 class Whitelist(Base):
     __tablename__ = "whitelist"
@@ -67,17 +68,22 @@ class Captcha(Base):
     user_id = Column(Integer, index=True)
     answer = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
-   
-# ====== Warning Table ======
-from sqlalchemy import func
 
+# ===== Warning & Blacklist =====
 class Warning(Base):
     __tablename__ = "warnings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger)
-    user_id = Column(BigInteger)
+    chat_id = Column(BigInteger, index=True)   # dùng BigInteger cho id Telegram
+    user_id = Column(BigInteger, index=True)
     count = Column(Integer, default=0)
     last_warned = Column(DateTime, default=func.now())
+
+class Blacklist(Base):
+    __tablename__ = "blacklist"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, index=True)
+    user_id = Column(BigInteger, index=True)
+    created_at = Column(DateTime, default=func.now())
 
 # ===== Utils =====
 
