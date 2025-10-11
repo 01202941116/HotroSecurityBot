@@ -369,18 +369,23 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ====== Startup hook ======
+from telegram.error import Conflict  # thêm dòng này
+
+# ... (giữ nguyên phần import khác)
+
+# ===== Startup hook =====
 async def on_startup(app: Application):
-    # XÓA WEBHOOK để đảm bảo dùng polling
+    # 1) XÓA WEBHOOK (nếu có) + bỏ hàng đợi cũ
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook cleared, now using polling mode.")
+        print("Webhook cleared, using polling mode.")
     except Exception as e:
-        print("⚠️ delete_webhook warn:", e)
+        print("delete_webhook warn:", e)
 
+    # phần cũ của bạn
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
-        print(f"🤖 Logged in as: {me.username}")
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
