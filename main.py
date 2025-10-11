@@ -89,25 +89,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
-        "<b>HotroSecurityBot – Full</b>\n\n"
-        "<b>FREE</b>\n"
-        "/filter_add &lt;từ&gt; – thêm từ khoá chặn\n"
-        "/filter_list – xem danh sách từ khoá\n"
-        "/filter_del &lt;id&gt; – xoá filter theo ID\n"
-        "/antilink_on | /antilink_off\n"
-        "/antimention_on | /antimention_off\n"
-        "/antiforward_on | /antiforward_off\n"
-        "/setflood &lt;n&gt; – giới hạn spam (mặc định 3)\n\n"
-        "<b>PRO</b>\n"
-        "/pro – bảng dùng thử / nhập key\n"
-        "/trial – dùng thử 7 ngày\n"
-        "/redeem &lt;key&gt; – kích hoạt key\n"
-        "/genkey &lt;days&gt; – (OWNER) sinh key\n"
-        "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n"
-        "/warn – (Admin) Reply vào tin có link để cảnh báo / xoá link / tự chặn khi vi phạm 3 lần\n\n"
-        f"Liên hệ @{CONTACT_USERNAME or 'HotroSecurity_Bot'} để mua key PRO."
-    )
-    await context.bot.send_message(update.effective_chat.id, txt, parse_mode=ParseMode.HTML)
+    "<b>HotroSecurityBot – Full</b>\n\n"
+    "<b>FREE</b>\n"
+    "/filter_add &lt;từ&gt; – thêm từ khoá chặn\n"
+    "/filter_list – xem danh sách từ khoá\n"
+    "/filter_del &lt;id&gt; – xoá filter theo ID\n"
+    "/antilink_on | /antilink_off\n"
+    "/antimention_on | /antimention_off\n"
+    "/antiforward_on | /antiforward_off\n"
+    "/setflood &lt;n&gt; – giới hạn spam (mặc định 3)\n\n"
+    "<b>PRO</b>\n"
+    "/pro – bảng dùng thử / nhập key\n"
+    "/trial – dùng thử 7 ngày\n"
+    "/redeem &lt;key&gt; – kích hoạt key\n"
+    "/genkey &lt;days&gt; – (OWNER) sinh key\n"
+    "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n\n"
+    "/warn – (Admin) Reply vào tin có link để cảnh báo / xoá link / tự chặn khi vi phạm 3 lần\n\n"
+    f"Liên hệ @{CONTACT_USERNAME or 'HotroSecurity_Bot'} để mua key PRO."
+)
+await context.bot.send_message(update.effective_chat.id, txt, parse_mode=ParseMode.HTML)
 
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
