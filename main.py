@@ -192,8 +192,9 @@ def main():
     print("PTB boot — token prefix:", BOT_TOKEN[:10], "…")
     init_db()
 
-        try:
-        keep_alive()  # chạy server nền để giữ bot sống
+    # Giữ bot sống
+    try:
+        keep_alive()  # ✅ dòng này phải thụt vào trong khối try
     except Exception as e:
         print("Lỗi keep_alive:", e)
 
@@ -215,7 +216,7 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # PRO (đăng ký đầy đủ, an toàn)
+    # PRO
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
@@ -224,6 +225,7 @@ def main():
 
     print("✅ Bot started.")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
