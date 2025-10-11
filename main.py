@@ -1,3 +1,4 @@
+# main.py
 import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
@@ -10,12 +11,13 @@ from telegram.constants import ParseMode
 
 from sqlalchemy import func
 from core.models import (
-    init_db, SessionLocal, Setting, Filter, Whitelist,
-    Warning, Blacklist,  # cần tồn tại trong core/models.py
+    init_db, SessionLocal,
+    Setting, Filter, Whitelist,
+    Warning, Blacklist,  # yêu cầu có trong core.models
 )
 from keep_alive_server import keep_alive
 
-# ===== PRO modules (an toàn nếu thiếu) =====
+# ====== PRO modules (an toàn nếu thiếu) ======
 try:
     from pro.handlers import register_handlers
 except Exception as e:
@@ -29,8 +31,9 @@ except Exception as e:
     attach_scheduler = lambda app: None
 
 
-# ===== UPTIME UTILS =====
+# ====== UPTIME UTILS ======
 START_AT = datetime.utcnow()
+
 def _fmt_td(td: timedelta) -> str:
     s = int(td.total_seconds())
     d, s = divmod(s, 86400)
@@ -44,38 +47,43 @@ def _fmt_td(td: timedelta) -> str:
     return " ".join(parts)
 
 
-# ===== ENV =====
+# ====== ENV ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
 
-# ===== STATE =====
+# ====== STATE / REGEX ======
 FLOOD = {}
 LINK_RE = re.compile(
     r"(https?://|http://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info)(/[^\s]*)?)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 def remove_links(text: str) -> str:
+    """Thay mọi link bằng [link bị xóa] nhưng giữ lại chữ mô tả."""
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
 
 
-# ===== Helpers =====
+# ====== Helpers ======
 def get_settings(chat_id: int) -> Setting:
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
     if not s:
         s = Setting(
             chat_id=chat_id,
-            antilink=True, antimention=True, antiforward=True,
-            flood_limit=3, flood_mode="mute"
+            antilink=True,
+            antimention=True,
+            antiforward=True,
+            flood_limit=3,
+            flood_mode="mute",
         )
-        db.add(s); db.commit()
+        db.add(s)
+        db.commit()
     return s
 
 
-# ===== Commands FREE =====
+# ====== Commands FREE ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
 
@@ -89,16 +97,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/antilink_on | /antilink_off\n"
         "/antimention_on | /antimention_off\n"
         "/antiforward_on | /antiforward_off\n"
-        "/setflood &lt;n&gt; – giới hạn spam (mặc định 3)\n"
-        "/uptime – xem thời gian chạy\n"
-        "/ping – đo độ trễ\n\n"
+        "/setflood &lt;n&gt; – giới hạn spam (mặc định 3)\n\n"
         "<b>PRO</b>\n"
-        "/warn (reply vào tin có link) – cảnh báo & gom vào blacklist sau 3 lần\n"
         "/pro – bảng dùng thử / nhập key\n"
         "/trial – dùng thử 7 ngày\n"
         "/redeem &lt;key&gt; – kích hoạt key\n"
         "/genkey &lt;days&gt; – (OWNER) sinh key\n"
-        "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n\n"
+        "/wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – whitelist link\n"
+        "/warn – (Admin) Reply vào tin có link để cảnh báo / xoá link / tự chặn khi vi phạm 3 lần\n\n"
         f"Liên hệ @{CONTACT_USERNAME or 'HotroSecurity_Bot'} để mua key PRO."
     )
     await context.bot.send_message(update.effective_chat.id, txt, parse_mode=ParseMode.HTML)
@@ -111,8 +117,9 @@ async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Từ khoá rỗng.")
     db = SessionLocal()
     f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
-    db.add(f); db.commit()
-    await update.message.reply_text(f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode=ParseMode.HTML)
+    db.add(f)
+    db.commit()
+    await update.message.reply_text(f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML")
 
 async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
@@ -133,15 +140,18 @@ async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
     if not it:
         return await update.message.reply_text("Không tìm thấy ID.")
-    db.delete(it); db.commit()
+    db.delete(it)
+    db.commit()
     await update.message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
 
 async def toggle(update: Update, field: str, val: bool, label: str):
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
     if not s:
-        s = Setting(chat_id=update.effective_chat.id); db.add(s)
-    setattr(s, field, val); db.commit()
+        s = Setting(chat_id=update.effective_chat.id)
+        db.add(s)
+    setattr(s, field, val)
+    db.commit()
     await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
 
 async def antilink_on(update, context):     await toggle(update, "antilink", True,  "Anti-link")
@@ -151,7 +161,24 @@ async def antimention_off(update, context): await toggle(update, "antimention", 
 async def antiforward_on(update, context):  await toggle(update, "antiforward", True,  "Anti-forward")
 async def antiforward_off(update, context): await toggle(update, "antiforward", False, "Anti-forward")
 
-# ===== UPTIME / PING =====
+async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /setflood <số tin>")
+    try:
+        n = max(2, int(context.args[0]))
+    except ValueError:
+        return await update.message.reply_text("Giá trị không hợp lệ.")
+    db = SessionLocal()
+    s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+    if not s:
+        s = Setting(chat_id=update.effective_chat.id)
+        db.add(s)
+    s.flood_limit = n
+    db.commit()
+    await update.message.reply_text(f"✅ Flood limit = {n}")
+
+
+# ====== UPTIME / PING ======
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     up = datetime.utcnow() - START_AT
     await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
@@ -163,7 +190,7 @@ async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await m.edit_text(f"🏓 Pong: {dt:.0f} ms")
 
 
-# ===== PRO: Admin reply → /warn =====
+# ====== PRO: Admin reply → /warn ======
 async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     chat_id = update.effective_chat.id
@@ -172,6 +199,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg.reply_to_message:
         return await msg.reply_text("Hãy reply vào tin có link rồi gõ /warn")
 
+    # Chỉ admin/creator được dùng
     try:
         member = await context.bot.get_chat_member(chat_id, admin_user.id)
         if member.status not in ("administrator", "creator"):
@@ -183,18 +211,19 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user = target_msg.from_user
     text = (target_msg.text or target_msg.caption or "")
 
-    if not LINK_RE.search(text or ""):
+    # Nếu tin không có link -> bỏ qua
+    if not LINK_RE.search(text):
         return await msg.reply_text("Tin được reply không chứa link.")
 
     db = SessionLocal()
 
-    # whitelist → bỏ qua
+    # link thuộc whitelist -> không xử lý
     wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-    if any(d and d.lower() in (text or "").lower() for d in wl):
+    if any(d and d.lower() in text.lower() for d in wl):
         db.close()
         return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
 
-    # Xoá tin gốc + thông báo
+    # Xóa tin gốc & thông báo bản đã loại link
     try:
         await target_msg.delete()
     except Exception:
@@ -206,7 +235,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    # Cập nhật warning
+    # Cập nhật warning count
     w = db.query(Warning).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
     if not w:
         w = Warning(chat_id=chat_id, user_id=target_user.id, count=1)
@@ -222,6 +251,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+    # đủ 3 lần -> thêm blacklist + (tuỳ chọn) restrict dài hạn
     if w.count >= 3:
         bl = db.query(Blacklist).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
         if not bl:
@@ -234,7 +264,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
 
-        # (tuỳ chọn) mute dài hạn
         try:
             until = datetime.now() + timedelta(days=365*10)
             await context.bot.restrict_chat_member(
@@ -248,11 +277,13 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.close()
 
 
-# ===== Guard (không bắt command) =====
+# ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    if not msg: return
-    if msg.text and msg.text.startswith("/"): return
+    if not msg:
+        return
+    if msg.text and msg.text.startswith("/"):
+        return
 
     chat_id = update.effective_chat.id
     text = (msg.text or msg.caption or "")
@@ -260,20 +291,20 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
-    # FILTER từ khoá
+    # Từ khoá cấm
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern and it.pattern.lower() in text.lower():
             try: await msg.delete()
             except Exception: pass
             return
 
-    # ANTI-FORWARD
+    # Chặn forward
     if s.antiforward and getattr(msg, "forward_origin", None):
         try: await msg.delete()
         except Exception: pass
         return
 
-    # ANTI-LINK (không whitelist thì xoá) — KHÔNG cảnh báo tự động
+    # Chặn link (trừ whitelist) — KHÔNG cảnh báo tự động
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         if not any(d and d.lower() in text.lower() for d in wl):
@@ -281,13 +312,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
-    # ANTI-MENTION
+    # Chặn mention
     if s.antimention and "@" in text:
         try: await msg.delete()
         except Exception: pass
         return
 
-    # FLOOD
+    # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
     now = datetime.now().timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
@@ -304,7 +335,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
-# ===== Error log =====
+# ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     err = repr(context.error)
     print("ERROR:", err)
@@ -315,9 +346,9 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         print("owner notify fail:", e)
 
 
-# ===== Startup hook =====
+# ====== Startup hook ======
 async def on_startup(app: Application):
-    # XÓA WEBHOOK ĐỂ DÙNG POLLING
+    # XÓA WEBHOOK để đảm bảo dùng polling
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("✅ Webhook cleared, now using polling mode.")
@@ -331,18 +362,18 @@ async def on_startup(app: Application):
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
-    # Gửi thông báo khởi động nếu có OWNER_ID
+    # Thông báo khởi động (tùy chọn)
     if OWNER_ID:
         try:
             await app.bot.send_message(
                 OWNER_ID,
-                f"🔁 Bot restarted và đang hoạt động!\n⏱ Uptime 0s\n✅ Ready to receive messages."
+                "🔁 Bot restarted và đang hoạt động!\n⏱ Uptime 0s\n✅ Ready."
             )
         except Exception as e:
             print("⚠️ Notify owner failed:", e)
 
 
-# ===== Main =====
+# ====== Main ======
 def main():
     if not BOT_TOKEN:
         raise SystemExit("❌ Missing BOT_TOKEN")
@@ -350,6 +381,7 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
+    # Giữ bot sống (Render)
     try:
         keep_alive()
     except Exception as e:
@@ -359,7 +391,7 @@ def main():
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # ===== Register handlers =====
+    # FREE
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -372,14 +404,22 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
+
+    # UPTIME / PING
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
-    app.add_handler(CommandHandler("warn", warn_cmd))
 
+    # PRO
+    app.add_handler(CommandHandler("warn", warn_cmd))  # admin reply → /warn
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
+    # Guard
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
