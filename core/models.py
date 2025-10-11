@@ -79,10 +79,10 @@ class Warning(Base):
     last_warned = Column(DateTime, default=func.now())
 
 class Blacklist(Base):
-    __tablename__ = "blacklist"
+    __tablename__ = "blacklists"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
-    user_id = Column(BigInteger, index=True)
+    chat_id = Column(Integer, index=True)
+    user_id = Column(Integer, index=True)
     created_at = Column(DateTime, default=func.now())
 
 # ===== Utils =====
