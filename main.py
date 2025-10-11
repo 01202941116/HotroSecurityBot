@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from telegram.constants import ParseMode
 
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist
-from keepalive import keepalive_run
+from keepalive import keep_alive  # ✅ đúng
 
 # pro modules (an toàn nếu thiếu)
 try:
