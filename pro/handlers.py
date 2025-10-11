@@ -1,4 +1,8 @@
 import secrets
+from telegram import Update
+from telegram.ext import ContextTypes, CommandHandler
+from telegram.constants import ParseMode
+from core.models import SessionLocal, PromoSetting
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
