@@ -151,6 +151,36 @@ async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = await update.message.reply_text("Pinging…")
     dt = (datetime.utcnow() - t0).total_seconds() * 1000
     await m.edit_text(f"🏓 Pong: {dt:.0f} ms")
+from sqlalchemy import func
+from core.models import Warning
+
+async def warn_user(chat_id: int, user_id: int, context):
+    db = SessionLocal()
+    w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user_id).one_or_none()
+    if not w:
+        w = Warning(chat_id=chat_id, user_id=user_id, count=1)
+        db.add(w)
+    else:
+        w.count += 1
+        w.last_warned = func.now()
+    db.commit()
+
+    # Gửi cảnh báo
+    await context.bot.send_message(
+        chat_id,
+        f"⚠️ <b>Cảnh báo:</b> <a href='tg://user?id={user_id}'>Người này</a> đã gửi link lạ! ({w.count}/3 lần)",
+        parse_mode="HTML"
+    )
+
+    # Nếu cảnh báo >= 3 lần → chặn vĩnh viễn
+    if w.count >= 3:
+        await context.bot.send_message(
+            chat_id,
+            f"🚫 <b>Người này bị đưa vào danh sách cảnh báo vĩnh viễn!</b>",
+            parse_mode="HTML"
+        )
+        w.count = 0
+        db.commit()
 
 # ===== Guard (không bắt command) =====
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +211,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await msg.delete()
             except Exception: pass
             return
-
+await warn_user(chat_id, msg.from_user.id, context)
     if s.antimention and "@" in text:
         try: await msg.delete()
         except Exception: pass
