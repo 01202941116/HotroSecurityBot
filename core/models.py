@@ -68,6 +68,14 @@ class Captcha(Base):
     user_id = Column(Integer, index=True)
     answer = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+# ==== Auto Promo ====
+class PromoSetting(Base):
+    __tablename__ = "promo_settings"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer, unique=True, index=True)
+    enabled = Column(Boolean, default=False)
+    text = Column(String, default="🎯 Tham gia gói PRO để mở khoá đầy đủ tính năng!")
+    interval_min = Column(Integer, default=360)  # 6 giờ
 
 # ===== Warning & Blacklist =====
 class Warning(Base):
