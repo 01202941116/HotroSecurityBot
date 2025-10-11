@@ -193,9 +193,9 @@ def main():
     init_db()
 
     try:
-        threading.Thread(target=keepalive_run, daemon=True).start()
-    except Exception:
-        pass
+    keep_alive()
+except Exception as e:
+    print("Lỗi keep_alive:", e)
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = on_startup
