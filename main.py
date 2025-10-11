@@ -317,25 +317,29 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== Startup hook =====
 async def on_startup(app: Application):
-    # Quan trọng: xoá webhook để đảm bảo dùng polling
+    # XÓA WEBHOOK ĐỂ DÙNG POLLING
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Webhook cleared, now using polling mode.")
     except Exception as e:
-        print("delete_webhook warn:", e)
+        print("⚠️ delete_webhook warn:", e)
 
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
+        print(f"🤖 Logged in as: {me.username}")
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
-    # Thông báo restart (tuỳ chọn)
-    try:
-        if OWNER_ID:
-            up = datetime.utcnow() - START_AT
-            await app.bot.send_message(OWNER_ID, f"🔁 Bot restarted.\n⏱ { _fmt_td(up) }\n✅ Ready.")
-    except Exception as e:
-        print("startup notify warn:", e)
+    # Gửi thông báo khởi động nếu có OWNER_ID
+    if OWNER_ID:
+        try:
+            await app.bot.send_message(
+                OWNER_ID,
+                f"🔁 Bot restarted và đang hoạt động!\n⏱ Uptime 0s\n✅ Ready to receive messages."
+            )
+        except Exception as e:
+            print("⚠️ Notify owner failed:", e)
 
 
 # ===== Main =====
@@ -343,20 +347,19 @@ def main():
     if not BOT_TOKEN:
         raise SystemExit("❌ Missing BOT_TOKEN")
 
-    print("PTB boot — token prefix:", BOT_TOKEN[:10], "…")
+    print("🚀 Booting bot...")
     init_db()
 
-    # Keepalive web (Render free)
     try:
         keep_alive()
     except Exception as e:
-        print("Lỗi keep_alive:", e)
+        print("⚠️ Lỗi keep_alive:", e)
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # FREE
+    # ===== Register handlers =====
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -369,22 +372,14 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
-
-    # UPTIME/PING
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
+    app.add_handler(CommandHandler("warn", warn_cmd))
 
-    # PRO
-    app.add_handler(CommandHandler("warn", warn_cmd))  # admin reply → /warn
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
-    # Guard
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
-    print("✅ Bot started.")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+    print("✅ Bot started, polling Telegram updates...")
+    app.run_polling(drop_pending_updates=True)
