@@ -121,6 +121,10 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("pro", pro_cmd))
     app.add_handler(CommandHandler("trial", trial_cmd))
     app.add_handler(CommandHandler("redeem", redeem_cmd))
+    app.add_handler(CommandHandler("ad_on", ad_on))
+    app.add_handler(CommandHandler("ad_off", ad_off))
+    app.add_handler(CommandHandler("ad_set", ad_set))
+    app.add_handler(CommandHandler("ad_interval", ad_interval))
     # owner genkey
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
     # whitelist
