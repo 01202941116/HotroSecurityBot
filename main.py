@@ -22,6 +22,22 @@ try:
 except Exception as e:
     print("pro.scheduler warn:", e)
     attach_scheduler = lambda app: None
+    # === UPTIME UTILS ===
+from datetime import datetime, timedelta  # nếu chưa có dòng này thì thêm vào
+START_AT = datetime.utcnow()
+
+def _fmt_td(td: timedelta) -> str:
+    s = int(td.total_seconds())
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
+
 
 # ===== ENV =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -125,6 +141,16 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not s: s = Setting(chat_id=update.effective_chat.id); db.add(s)
     s.flood_limit = n; db.commit()
     await update.message.reply_text(f"✅ Flood limit = {n}")
+# ===== UPTIME / PING =====
+async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    up = datetime.utcnow() - START_AT
+    await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
+
+async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    t0 = datetime.utcnow()
+    m = await update.message.reply_text("Pinging…")
+    dt = (datetime.utcnow() - t0).total_seconds() * 1000
+    await m.edit_text(f"🏓 Pong: {dt:.0f} ms")
 
 # ===== Guard (không bắt command) =====
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,6 +241,9 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
+    # UPTIME/PING
+    app.add_handler(CommandHandler("uptime", uptime_cmd))
+    app.add_handler(CommandHandler("ping", ping_cmd))
 
     # PRO
     register_handlers(app, owner_id=OWNER_ID)
