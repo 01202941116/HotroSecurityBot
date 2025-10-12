@@ -597,6 +597,24 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
     finally:
         db.close()
+        # ====== NGÔN NGỮ / LANGUAGE SWITCH ======
+from core.lang import t, LANG
+
+USER_LANG = {}  # Lưu ngôn ngữ từng user
+
+async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /lang <mã_ngôn_ngữ> — ví dụ: /lang en hoặc /lang vi"""
+    if not context.args:
+        return await update.message.reply_text(
+            "🌐 Cú pháp: /lang <vi|en>\nVí dụ: /lang en"
+        )
+    code = context.args[0].lower()
+    if code not in LANG:
+        return await update.message.reply_text("❗ Ngôn ngữ không hợp lệ. Dùng vi hoặc en.")
+    USER_LANG[update.effective_user.id] = code
+    await update.message.reply_text(
+        "✅ Ngôn ngữ đã được đổi sang " + ("🇻🇳 Tiếng Việt" if code == "vi" else "🇬🇧 English")
+    )
 # ====== END FILTERS & TOGGLES BLOCK ======
 
 
