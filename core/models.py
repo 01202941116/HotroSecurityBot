@@ -109,4 +109,23 @@ def add_days(d: int):
         return db.query(User).count()
     finally:
         db.close()
+# ===== Utils =====
+def init_db():
+    Base.metadata.create_all(engine)
+
+def now_utc():
+    return datetime.utcnow()
+
+def add_days(d: int):
+    return now_utc() + timedelta(days=d)
+
+# Đếm số User (dùng cho hiển thị thống kê)
+def count_users(session=None) -> int:
+    """Return total users in DB. If no session provided, create a temp one."""
+    s = session or SessionLocal()
+    try:
+        return s.query(User).count()
+    finally:
+        if session is None:
+            s.close()
 
