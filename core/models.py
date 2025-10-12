@@ -84,13 +84,13 @@ class Captcha(Base):
 # ==== Auto Promo (đồng bộ với main.py/scheduler.py) ====
 class PromoSetting(Base):
     __tablename__ = "promo_settings"
+
     id = Column(Integer, primary_key=True)
     chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
-    # Trường đang dùng:
-    is_enabled = Column(Boolean, default=False)       # /ad_on | /ad_off
-    content = Column(String, default="")              # /ad_set <nội dung>
-    interval_minutes = Column(Integer, default=60)    # /ad_interval <phút>
+    is_enabled = Column(Boolean, default=False)
+    content = Column(Text, default="")
+    interval_minutes = Column(Integer, default=60)
     last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
 
     # Lưu ý: nếu DB cũ vẫn còn các cột cũ (enabled/text/interval_min) thì
