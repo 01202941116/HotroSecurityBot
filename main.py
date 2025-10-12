@@ -398,4 +398,5 @@ def main():
     app.run_polling(drop_pending_updates=True, timeout=60)
 
 if __name__ == "__main__":
-    main()
+    keep_alive()
+    app.run_polling(timeout=60)
