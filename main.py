@@ -356,7 +356,7 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
-    # Giữ Render thức
+    # giữ Render thức
     try:
         keep_alive()
     except Exception as e:
@@ -366,11 +366,12 @@ def main():
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # FREE
+    # ===== ĐĂNG KÝ HANDLERS (các hàm PHẢI được định nghĩa bên trên) =====
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
+
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
@@ -382,21 +383,18 @@ def main():
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
 
-    # UPTIME / PING
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
 
-    # PRO
-    app.add_handler(CommandHandler("warn", warn_cmd))  # admin reply → /warn
+    app.add_handler(CommandHandler("warn", warn_cmd))
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
-    # Guard
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
+
 if __name__ == "__main__":
-    keep_alive()
-    app.run_polling(timeout=60)
+    main()
