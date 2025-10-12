@@ -1,10 +1,10 @@
 # core/models.py
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
-    BigInteger, func
+    BigInteger, func, inspect, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -15,8 +15,17 @@ engine = create_engine(DB_URL, future=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 Base = declarative_base()
 
-# ===== ENTITIES =====
 
+# ====== UTILS ======
+def now_utc():
+    """Datetime timezone-aware (UTC)."""
+    return datetime.now(timezone.utc)
+
+def add_days(d: int):
+    return now_utc() + timedelta(days=d)
+
+
+# ===== ENTITIES =====
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)           # telegram user id
@@ -32,13 +41,13 @@ class LicenseKey(Base):
     days = Column(Integer, default=30)
     issued_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_utc)
 
 class Trial(Base):
     __tablename__ = "trials"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, unique=True)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=now_utc)
     expires_at = Column(DateTime)
     active = Column(Boolean, default=True)
 
@@ -70,22 +79,28 @@ class Captcha(Base):
     chat_id = Column(BigInteger, index=True)
     user_id = Column(BigInteger, index=True)
     answer = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_utc)
 
-# ==== Auto Promo ====
+# ==== Auto Promo (đồng bộ với main.py/scheduler.py) ====
 class PromoSetting(Base):
     __tablename__ = "promo_settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True)
-    enabled = Column(Boolean, default=False)
-    text = Column(String, default="🎯 Tham gia gói PRO để mở khoá đầy đủ tính năng!")
-    interval_min = Column(Integer, default=360)  # 6 giờ
+    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
+
+    # Trường đang dùng:
+    is_enabled = Column(Boolean, default=False)       # /ad_on | /ad_off
+    content = Column(String, default="")              # /ad_set <nội dung>
+    interval_minutes = Column(Integer, default=60)    # /ad_interval <phút>
+    last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
+
+    # Lưu ý: nếu DB cũ vẫn còn các cột cũ (enabled/text/interval_min) thì
+    # init_db() phía dưới sẽ tự thêm các cột mới và copy dữ liệu (nếu có).
 
 # ===== Warning & Blacklist =====
 class Warning(Base):
     __tablename__ = "warnings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)   # dùng BigInteger cho id Telegram
+    chat_id = Column(BigInteger, index=True)
     user_id = Column(BigInteger, index=True)
     count = Column(Integer, default=0)
     last_warned = Column(DateTime, default=func.now())
@@ -97,63 +112,61 @@ class Blacklist(Base):
     user_id = Column(BigInteger, index=True)
     created_at = Column(DateTime, default=func.now())
 
-# ===== UTILS =====
 
+# ===== INIT / MIGRATION =====
 def init_db():
-    Base.metadata.create_all(engine)
+    """Tạo bảng và tự migrate nhẹ cho promo_settings."""
+    Base.metadata.create_all(bind=engine)
 
-def now_utc():
-    return datetime.utcnow()
+    # --- Tự thêm các cột mới cho promo_settings nếu thiếu ---
+    try:
+        insp = inspect(engine)
+        cols = {c["name"] for c in insp.get_columns("promo_settings")}
 
-def add_days(d: int):
-    return now_utc() + timedelta(days=d)
+        # Thêm cột mới nếu còn thiếu
+        with engine.begin() as conn:
+            if "is_enabled" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE promo_settings ADD COLUMN is_enabled BOOLEAN DEFAULT 0"
+                ))
+            if "content" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE promo_settings ADD COLUMN content TEXT DEFAULT ''"
+                ))
+            if "interval_minutes" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE promo_settings ADD COLUMN interval_minutes INTEGER DEFAULT 60"
+                ))
+            if "last_sent_at" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"
+                ))
 
+            # Nếu bảng cũ có cột legacy (enabled/text/interval_min) → copy sang cột mới
+            cols = {c["name"] for c in insp.get_columns("promo_settings")}
+            if {"enabled", "is_enabled"}.issubset(cols):
+                conn.execute(text(
+                    "UPDATE promo_settings SET is_enabled = COALESCE(is_enabled, enabled)"
+                ))
+            if {"text", "content"}.issubset(cols):
+                conn.execute(text(
+                    "UPDATE promo_settings SET content = COALESCE(NULLIF(content, ''), text)"
+                ))
+            if {"interval_min", "interval_minutes"}.issubset(cols):
+                conn.execute(text(
+                    "UPDATE promo_settings SET interval_minutes = COALESCE(interval_minutes, interval_min)"
+                ))
+    except Exception as e:
+        # Không để crash nếu DB không hỗ trợ ALTER TABLE
+        print("[migrate] promo_settings migration note:", e)
+
+
+# ===== HELPERS =====
 def count_users(session=None) -> int:
     """Đếm tổng số người dùng (User) trong CSDL."""
     s = session or SessionLocal()
     try:
         return s.query(User).count()
-        # core/models.py
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, BigInteger, Boolean, Text, DateTime
-# ... các import khác ...
-
-def now_utc():
-    return datetime.now(timezone.utc)
-
-class PromoSetting(Base):
-    __tablename__ = "promo_settings"
-
-    id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
-
-    is_enabled = Column(Boolean, default=False)        # /ad_on | /ad_off
-    content = Column(Text, default="")                 # /ad_set <nội dung>
-    interval_minutes = Column(Integer, default=60)     # /ad_interval <phút>
-
-    # >>> THÊM CỘT NÀY <<<
-    last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
-
     finally:
         if session is None:
             s.close()
-# core/models.py
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, BigInteger, Boolean, Text, DateTime
-# ... các import/layer khác ...
-
-def now_utc():
-    return datetime.now(timezone.utc)
-
-class PromoSetting(Base):
-    __tablename__ = "promo_settings"
-
-    id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
-
-    is_enabled = Column(Boolean, default=False)          # /ad_on | /ad_off
-    content = Column(Text, default="")                   # /ad_set <nội dung>
-    interval_minutes = Column(Integer, default=60)       # /ad_interval <phút>
-
-    # >>> THÊM CỘT NÀY <<<
-    last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
