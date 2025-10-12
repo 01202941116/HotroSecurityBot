@@ -652,11 +652,12 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ps = _get_ps(db, update.effective_chat.id)
         last = ps.last_sent_at.isoformat() if ps.last_sent_at else "—"
         await update.message.reply_text(
-            "📊 Trạng thái QC:\n"
-            f"• Bật: { '✅' if ps.is_enabled else '❎' }\n"
-            f"• Chu kỳ: {ps.interval_minutes} phút\n"
-            f"• Nội dung: {('đã đặt' nếu := ps.content) and 'đã đặt' or '—'}\n"
-            f"• Lần gửi gần nhất: {last}"
+    "📊 Trạng thái QC:\n"
+    f"• Bật: {'✅' if ps.is_enabled else '❎'}\n"
+    f"• Chu kỳ: {ps.interval_minutes} phút\n"
+    f"• Nội dung: {'đã đặt' if ps.content else '—'}\n"
+    f"• Lần gửi gần nhất: {last}"
+)
         )
     finally:
         db.close()
