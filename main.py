@@ -3,7 +3,7 @@ import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from telegram.error import Conflict  # để lọc lỗi Conflict
 from core.models import init_db, SessionLocal, Setting, Filter, Whitelist, User, count_users
 from telegram import Update, ChatPermissions
@@ -17,7 +17,10 @@ from core.models import (
     Warning, Blacklist,  # yêu cầu có trong core.models
 )
 from keep_alive_server import keep_alive  # ở đầu file nếu chưa import
-
+if __name__ == "__main__":
+    keep_alive()  # Chạy Flask để giữ Render hoạt động
+    # Chạy bot
+    app.run_polling(timeout=60)
 def main():
     if not BOT_TOKEN:
         raise SystemExit("❌ Missing BOT_TOKEN")
@@ -55,7 +58,7 @@ except Exception as e:
 
 
 # ====== UPTIME UTILS ======
-START_AT = datetime.utcnow()
+START_AT = datetime.now(timezone.utc)
 
 def _fmt_td(td: timedelta) -> str:
     s = int(td.total_seconds())
