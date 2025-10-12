@@ -437,7 +437,7 @@ def main():
     init_db()
 
     # Giữ bot sống (Render)
-    try:
+try:
     keep_alive()
 except Exception as e:
     print("Lỗi keep_alive:", e)
