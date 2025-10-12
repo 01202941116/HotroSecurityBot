@@ -371,11 +371,7 @@ def main():
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("ad_set", ad_set))
-    app.add_handler(CommandHandler("ad_interval", ad_interval))
-    app.add_handler(CommandHandler("ad_on", ad_on))
-    app.add_handler(CommandHandler("ad_off", ad_off))
-    app.add_handler(CommandHandler("ad_status", ad_status))
+    
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
