@@ -1,5 +1,5 @@
 # pro/scheduler.py
-from datetime import timedelta
+from datetime import timedelta, timezone as _tz
 from pytz import utc
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -11,6 +11,14 @@ from core.models import (
     PromoSetting,
 )
 
+# ==== Datetime helpers (UTC-aware) ====
+def ensure_aware(dt):
+    """Đảm bảo datetime có tzinfo=UTC (aware)."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+
+
 # ---------- JOB 1: Hết hạn PRO / TRIAL (chạy bằng APScheduler, sync) ----------
 def _expire_pro():
     db = SessionLocal()
@@ -19,14 +27,16 @@ def _expire_pro():
 
         # Hết hạn PRO
         for u in db.query(User).filter(User.is_pro == True).all():
-            if u.pro_expires_at and u.pro_expires_at <= now:
+            exp = ensure_aware(u.pro_expires_at)
+            if exp and exp <= now:
                 print(f"[SCHEDULER] Hết hạn PRO user_id={u.id}")
                 u.is_pro = False
                 u.pro_expires_at = None
 
         # Hết hạn TRIAL
         for t in db.query(Trial).filter(Trial.active == True).all():
-            if t.expires_at and t.expires_at <= now:
+            exp = ensure_aware(t.expires_at)
+            if exp and exp <= now:
                 print(f"[SCHEDULER] Hết hạn TRIAL user_id={t.user_id}")
                 t.active = False
 
@@ -51,25 +61,31 @@ async def _promo_tick_job(context):
             # Điều kiện gửi
             if not (ps.content and ps.interval_minutes and ps.interval_minutes >= 10):
                 continue
-            if ps.last_sent_at is None or (now - ps.last_sent_at) >= timedelta(minutes=ps.interval_minutes):
-                try:
-                    await context.bot.send_message(
-                        ps.chat_id,
-                        ps.content,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
-                    )
-                    ps.last_sent_at = now
-                    db.commit()
-                    sent += 1
-                    print(f"[promo_tick] sent -> chat_id={ps.chat_id}")
-                except Exception as e:
-                    print(f"[promo_tick] send fail chat_id={ps.chat_id}: {e}")
-                    # đừng raise; vẫn tiếp tục các chat khác
+
+            last = ensure_aware(ps.last_sent_at)
+            should_send = (last is None) or ((now - last) >= timedelta(minutes=ps.interval_minutes))
+            if not should_send:
+                continue
+
+            try:
+                await context.bot.send_message(
+                    ps.chat_id,
+                    ps.content,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                ps.last_sent_at = now
+                db.commit()
+                sent += 1
+                print(f"[promo_tick] sent -> chat_id={ps.chat_id}")
+            except Exception as e:
+                print(f"[promo_tick] send fail chat_id={ps.chat_id}: {e}")
+                # không raise để tiếp tục các chat khác
     except Exception as e:
         print("[promo_tick] error:", e)
     finally:
         db.close()
+
     if sent:
         print(f"[promo_tick] done, sent={sent}")
 
@@ -108,16 +124,3 @@ def attach_scheduler(app):
         print("✅ JobQueue: promo_tick mỗi 60 giây")
     except Exception as e:
         print("❌ Lỗi attach JobQueue promo_tick:", e)
-        # ==== Datetime helpers (UTC-aware) ====
-from datetime import timezone as _tz
-
-def ensure_aware(dt):
-    """Trả về datetime có tzinfo=UTC. Nếu None giữ nguyên."""
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
-
-def now_utc():
-    # GIỮ HÀNH VI UTC-AWARE
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc)
