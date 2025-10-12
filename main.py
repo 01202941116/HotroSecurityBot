@@ -57,8 +57,8 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 # ====== STATE / REGEX ======
 FLOOD = {}
 LINK_RE = re.compile(
-    r"(https?://|http://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info)(/[^\s]*)?)",
-    re.IGNORECASE,
+    r"(https?://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co)(/[^\s]*)?)",
+    re.IGNORECASE
 )
 
 def remove_links(text: str) -> str:
