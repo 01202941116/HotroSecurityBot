@@ -394,6 +394,106 @@ def main():
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
+    # ====== FILTERS & TOGGLES (ADD THIS BLOCK) ======
+async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text(
+            "Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML"
+        )
+    pattern = " ".join(context.args).strip()
+    if not pattern:
+        return await update.message.reply_text("Từ khoá rỗng.")
+    db = SessionLocal()
+    try:
+        f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
+        db.add(f)
+        db.commit()
+        await update.message.reply_text(
+            f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML"
+        )
+    finally:
+        db.close()
+
+async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        items = db.query(Filter).filter_by(chat_id=update.effective_chat.id).all()
+        if not items:
+            return await update.message.reply_text("Danh sách filter trống.")
+        out = ["<b>Filters:</b>"] + [f"{i.id}. <code>{i.pattern}</code>" for i in items]
+        await update.message.reply_text("\n".join(out), parse_mode=ParseMode.HTML)
+    finally:
+        db.close()
+
+async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /filter_del <id>")
+    try:
+        fid = int(context.args[0])
+    except ValueError:
+        return await update.message.reply_text("ID không hợp lệ.")
+    db = SessionLocal()
+    try:
+        it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
+        if not it:
+            return await update.message.reply_text("Không tìm thấy ID.")
+        db.delete(it)
+        db.commit()
+        await update.message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
+    finally:
+        db.close()
+
+async def _toggle(update: Update, field: str, val: bool, label: str):
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = Setting(chat_id=update.effective_chat.id)
+            db.add(s)
+        setattr(s, field, val)
+        db.commit()
+        await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
+    finally:
+        db.close()
+
+async def antilink_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antilink", True, "Anti-link")
+
+async def antilink_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antilink", False, "Anti-link")
+
+async def antimention_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antimention", True, "Anti-mention")
+
+async def antimention_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antimention", False, "Anti-mention")
+
+async def antiforward_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antiforward", True, "Anti-forward")
+
+async def antiforward_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle(update, "antiforward", False, "Anti-forward")
+
+async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /setflood <số tin>")
+    try:
+        n = max(2, int(context.args[0]))
+    except ValueError:
+        return await update.message.reply_text("Giá trị không hợp lệ.")
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = Setting(chat_id=update.effective_chat.id)
+            db.add(s)
+        s.flood_limit = n
+        db.commit()
+        await update.message.reply_text(f"✅ Flood limit = {n}")
+    finally:
+        db.close()
+# ====== END FILTERS & TOGGLES BLOCK ======
+
 
 
 if __name__ == "__main__":
