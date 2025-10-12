@@ -103,58 +103,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(update.effective_chat.id, msg, parse_mode=ParseMode.HTML)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = (
-        "🎯 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
-        "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
-
-        "🆓 <b>GÓI FREE</b>\n"
-        "• /filter_add &lt;từ&gt; – Thêm từ khoá cần chặn\n"
-        "• /filter_list – Xem danh sách từ khoá đã chặn\n"
-        "• /filter_del &lt;id&gt; – Xoá filter theo ID\n"
-        "• /antilink_on | /antilink_off – Bật/tắt chặn link\n"
-        "• /antimention_on | /antimention_off – Bật/tắt chặn tag @all / mention\n"
-        "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
-        "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n\n"
-
-        "💎 <b>GÓI PRO</b>\n"
-        "• /pro – Mở bảng hướng dẫn dùng thử & kích hoạt PRO\n"
-        "• /trial – Dùng thử miễn phí 7 ngày\n"
-        "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
-        "• /genkey &lt;days&gt; – (OWNER) Tạo key PRO thời hạn tuỳ chọn\n"
-        "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist link được phép gửi\n"
-        "• /warn – (Admin) Trả lời vào tin có link để cảnh báo / xoá link / tự động chặn khi vi phạm 3 lần\n\n"
-
-        "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
-        "Tính năng hỗ trợ đăng tin quảng cáo tự động theo chu kỳ thời gian.\n"
-        "• /ad_on – Bật quảng cáo tự động cho nhóm\n"
-        "• /ad_off – Tắt quảng cáo tự động\n"
-        "• /ad_set &lt;nội dung&gt; – Đặt nội dung quảng cáo sẽ được bot gửi\n"
-        "• /ad_interval &lt;phút&gt; – Đặt chu kỳ gửi quảng cáo (mặc định 60 phút)\n\n"
-
-        "⚙️ <b>THÔNG TIN & HỖ TRỢ</b>\n"
-        f"• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
-        "• Bot hoạt động 24/7 – phù hợp cho các nhóm Momo, game, trade, chia sẻ link, quảng bá sản phẩm.\n"
-        "• Các tính năng PRO giúp nhóm bạn an toàn, sạch spam và chuyên nghiệp hơn.\n\n"
-
-        "🚀 <i>Cảm ơn bạn đã sử dụng HotroSecurityBot!</i>"
-    )
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = USER_LANG.get(uid, "vi")
+    txt = t(lang, "help_full")
     await context.bot.send_message(
         update.effective_chat.id,
         txt,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
-
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total = count_users()
-    await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
-
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t0 = datetime.now(timezone.utc)
-    m = await update.message.reply_text("⏳ Đang đo ping…")
-    dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-    up = datetime.now(timezone.utc) - START_AT
-    await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
 
 # ====== UPTIME / PING ======
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -600,6 +557,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
         # ====== NGÔN NGỮ / LANGUAGE SWITCH ======
 from core.lang import t, LANG
+USER_LANG: dict[int, str] = {}  # user_id -> 'vi' | 'en'
 
 USER_LANG = {}  # Lưu ngôn ngữ từng user
 
