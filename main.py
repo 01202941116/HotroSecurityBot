@@ -16,7 +16,29 @@ from core.models import (
     Setting, Filter, Whitelist,
     Warning, Blacklist,  # yêu cầu có trong core.models
 )
-from keep_alive_server import keep_alive
+from keep_alive_server import keep_alive  # ở đầu file nếu chưa import
+
+def main():
+    if not BOT_TOKEN:
+        raise SystemExit("❌ Missing BOT_TOKEN")
+
+    init_db()
+
+    # Bật web-keepalive để Render không sleep & UptimeRobot kiểm tra được
+    try:
+        keep_alive()
+    except Exception as e:
+        print("keep_alive warn:", e)
+
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.post_init = on_startup
+    app.add_error_handler(on_error)
+
+    # ... add handlers như hiện tại ...
+
+    # Dọn update cũ tránh “terminated by other getUpdates request”
+    app.run_polling(drop_pending_updates=True)
+
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
