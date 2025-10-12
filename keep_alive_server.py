@@ -1,7 +1,14 @@
 # keep_alive_server.py
 from flask import Flask
 from threading import Thread
-from waitress import serve  # thêm dòng này
+import os
+
+# Nếu bạn muốn dùng waitress production server:
+try:
+    from waitress import serve
+    USE_WAITRESS = True
+except Exception:
+    USE_WAITRESS = False
 
 app = Flask(__name__)
 
@@ -9,10 +16,16 @@ app = Flask(__name__)
 def home():
     return "✅ HotroSecurityBot is running!"
 
-def _run():
-    # chạy với waitress thay cho flask run()
-    serve(app, host="0.0.0.0", port=8080)
+def run():
+    port = int(os.getenv("PORT", "8080"))  # Render cấp PORT qua biến môi trường
+    if USE_WAITRESS:
+        # chạy bằng waitress để ổn định hơn
+        serve(app, host="0.0.0.0", port=port)
+    else:
+        # fallback: Flask dev server (vẫn đọc PORT của Render)
+        app.run(host="0.0.0.0", port=port, debug=False)
 
 def keep_alive():
-    t = Thread(target=_run, daemon=True)
+    t = Thread(target=run)
+    t.daemon = True
     t.start()
