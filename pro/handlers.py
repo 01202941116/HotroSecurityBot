@@ -27,6 +27,22 @@ def ensure_aware(dt):
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
 
 
+def _has_active_pro(db: SessionLocal, user_id: int) -> bool:
+    """User còn PRO/TRIAL? (timezone-aware)."""
+    now = now_utc()
+    u = db.query(User).filter_by(id=user_id).one_or_none()
+    if u and u.is_pro:
+        exp = ensure_aware(u.pro_expires_at)
+        if exp and exp > now:
+            return True
+    t = db.query(Trial).filter_by(user_id=user_id, active=True).one_or_none()
+    if t:
+        exp = ensure_aware(t.expires_at)
+        if exp and exp > now:
+            return True
+    return False
+
+
 HELP_PRO = (
     "<b>Gói PRO</b>\n"
     "• Dùng thử 7 ngày: /trial\n"
@@ -213,12 +229,16 @@ async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     db = SessionLocal()
     try:
+        # Chặn nếu không còn PRO/TRIAL
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.message.reply_text("❗ Tính năng này chỉ dành cho người dùng còn PRO/TRIAL.")
+
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, enabled=True)
+            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True)
             db.add(s)
         else:
-            s.enabled = True
+            s.is_enabled = True
         db.commit()
         await update.message.reply_text("✅ Đã bật quảng cáo tự động cho nhóm này.")
     finally:
@@ -231,10 +251,10 @@ async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, enabled=False)
+            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=False)
             db.add(s)
         else:
-            s.enabled = False
+            s.is_enabled = False
         db.commit()
         await update.message.reply_text("⛔️ Đã tắt quảng cáo tự động cho nhóm này.")
     finally:
@@ -249,12 +269,15 @@ async def ad_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.message.reply_text("❗ Tính năng này chỉ dành cho người dùng còn PRO/TRIAL.")
+
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, enabled=True, text=text)
+            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True, content=text)
             db.add(s)
         else:
-            s.text = text
+            s.content = text
         db.commit()
         await update.message.reply_text("📝 Đã cập nhật nội dung quảng cáo.")
     finally:
@@ -272,36 +295,19 @@ async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.message.reply_text("❗ Tính năng này chỉ dành cho người dùng còn PRO/TRIAL.")
+
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, enabled=True, interval_min=minutes)
+            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True, interval_minutes=minutes)
             db.add(s)
         else:
-            s.interval_min = minutes
+            s.interval_minutes = minutes
+        # reset để tick kế tiếp gửi luôn khi đủ chu kỳ mới
+        s.last_sent_at = None
         db.commit()
         await update.message.reply_text(f"⏱ Chu kỳ quảng cáo: {minutes} phút.")
-    finally:
-        db.close()
-
-# job chạy mỗi 60s, gửi QC cho nhóm đã đến hạn
-async def _promo_tick(context: ContextTypes.DEFAULT_TYPE):
-    db = SessionLocal()
-    now = now_utc()
-    try:
-        enabled = db.query(PromoSetting).filter_by(enabled=True).all()
-        for s in enabled:
-            if not s.text:
-                continue
-            last = ensure_aware(s.last_sent_at)
-            interval = (s.interval_min or 60) * 60
-            if last is None or (now - last).total_seconds() >= interval:
-                try:
-                    await context.bot.send_message(s.chat_id, s.text, disable_web_page_preview=True)
-                    s.last_sent_at = now
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                    continue
     finally:
         db.close()
 
@@ -317,30 +323,11 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
 
+    # Quảng cáo tự động (admin, cần PRO/TRIAL)
     app.add_handler(CommandHandler("ad_on", ad_on))
     app.add_handler(CommandHandler("ad_off", ad_off))
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
 
-    if app.job_queue and not app.bot_data.get("promo_job_installed"):
-        app.job_queue.run_repeating(_promo_tick, interval=60, name="promo_tick", first=10)
-        app.bot_data["promo_job_installed"] = True
-        print("[pro] promo_tick job installed")
-        # pro/handlers.py (thêm vào đầu file, bên cạnh imports)
-from datetime import timezone as _tz
-
-def _aware(dt):
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
-
-def _has_active_pro(db, user_id: int) -> bool:
-    now = now_utc()
-    u = db.query(User).filter_by(id=user_id).one_or_none()
-    if u and u.is_pro and _aware(u.pro_expires_at) and _aware(u.pro_expires_at) > now:
-        return True
-    t = db.query(Trial).filter_by(user_id=user_id, active=True).one_or_none()
-    if t and _aware(t.expires_at) and _aware(t.expires_at) > now:
-        return True
-    return False
-
+    # ❗ Không đăng ký job ở đây nữa. Job quảng cáo đã chạy trong pro/scheduler.py
+    # để tránh trùng job và lỗi.
