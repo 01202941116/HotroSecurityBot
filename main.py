@@ -492,6 +492,103 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
+        # ====== QUẢNG CÁO TỰ ĐỘNG (HANDLERS) ======
+from core.models import PromoSetting
+
+async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Cho phép ở private; ở group thì phải là admin/creator."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat.type == "private":
+        return True
+    try:
+        m = await context.bot.get_chat_member(chat.id, user.id)
+        return m.status in ("administrator", "creator")
+    except Exception:
+        # vẫn trả False nhưng handler sẽ trả lời rõ ràng
+        return False
+
+def _get_ps(db, chat_id: int) -> PromoSetting:
+    ps = db.query(PromoSetting).filter_by(chat_id=chat_id).one_or_none()
+    if not ps:
+        ps = PromoSetting(chat_id=chat_id, is_enabled=False, content="", interval_minutes=60, last_sent_at=None)
+        db.add(ps); db.commit(); db.refresh(ps)
+    return ps
+
+async def ad_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        if not await _must_admin(update, context):
+            return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+        if not context.args:
+            return await update.message.reply_text("Cú pháp: /ad_set <nội dung>")
+        text = " ".join(context.args).strip()
+        ps = _get_ps(db, update.effective_chat.id)
+        ps.content = text
+        db.commit()
+        await update.message.reply_text("✅ Đã cập nhật nội dung quảng cáo.")
+    finally:
+        db.close()
+
+async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        if not await _must_admin(update, context):
+            return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+        if not context.args:
+            return await update.message.reply_text("Cú pháp: /ad_interval <phút>")
+        try:
+            minutes = int(context.args[0])
+        except ValueError:
+            return await update.message.reply_text("Giá trị phút không hợp lệ.")
+        minutes = max(10, minutes)  # min 10p cho an toàn
+        ps = _get_ps(db, update.effective_chat.id)
+        ps.interval_minutes = minutes
+        ps.last_sent_at = None  # ép tick kế tiếp đủ điều kiện sẽ gửi
+        db.commit()
+        await update.message.reply_text(f"⏱ Chu kỳ quảng cáo: {minutes} phút.")
+    finally:
+        db.close()
+
+async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        if not await _must_admin(update, context):
+            return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+        ps = _get_ps(db, update.effective_chat.id)
+        ps.is_enabled = True
+        ps.last_sent_at = None
+        db.commit()
+        await update.message.reply_text("📢 Đã bật quảng cáo tự động.")
+    finally:
+        db.close()
+
+async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        if not await _must_admin(update, context):
+            return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+        ps = _get_ps(db, update.effective_chat.id)
+        ps.is_enabled = False
+        db.commit()
+        await update.message.reply_text("🔕 Đã tắt quảng cáo tự động.")
+    finally:
+        db.close()
+
+async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        ps = _get_ps(db, update.effective_chat.id)
+        last = ps.last_sent_at.isoformat() if ps.last_sent_at else "—"
+        await update.message.reply_text(
+            "📊 Trạng thái QC:\n"
+            f"• Bật: { '✅' if ps.is_enabled else '❎' }\n"
+            f"• Chu kỳ: {ps.interval_minutes} phút\n"
+            f"• Nội dung: {('đã đặt' if ps.content else '—')}\n"
+            f"• Lần gửi gần nhất: {last}"
+        )
+    finally:
+        db.close()
 # ====== END FILTERS & TOGGLES BLOCK ======
 
 
