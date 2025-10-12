@@ -4,16 +4,16 @@ from threading import Thread
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
     return "✅ HotroSecurityBot is running!"
 
-def run():
-    # Đặt debug=False, host 0.0.0.0 để Render không chặn
-    app.run(host='0.0.0.0', port=8080, debug=False)
+def _run():
+    # Lắng nghe trên 0.0.0.0:8080 để Render/uptime robot ping được
+    # Không bật debug để tránh log thừa & tự reload
+    app.run(host="0.0.0.0", port=8080, debug=False)
 
 def keep_alive():
-    # Chạy Flask trên luồng riêng, không chặn bot chính
-    t = Thread(target=run)
-    t.daemon = True  # đảm bảo thread tự đóng khi main process dừng
+    # Chạy Flask ở luồng nền; tự thoát khi tiến trình chính dừng
+    t = Thread(target=_run, daemon=True)
     t.start()
