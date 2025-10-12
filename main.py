@@ -14,19 +14,6 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
-# ====== I18N ======
-from core.lang import t
-
-# Lưu lựa chọn ngôn ngữ trong RAM (user và/hoặc chat)
-LANG_PREF_USER: dict[int, str] = {}   # {user_id: "vi"|"en"}
-LANG_PREF_CHAT: dict[int, str] = {}   # {chat_id: "vi"|"en"}
-
-def _get_lang(update: Update) -> str:
-    """Ưu tiên: cài cho chat -> cài cho user -> 'vi'."""
-    uid = update.effective_user.id if update.effective_user else 0
-    cid = update.effective_chat.id if update.effective_chat else 0
-    return LANG_PREF_CHAT.get(cid) or LANG_PREF_USER.get(uid) or "vi"
-
 # ====== LOCAL MODELS ======
 from core.models import (
     init_db, SessionLocal, Setting, Filter, Whitelist,
@@ -97,79 +84,6 @@ def get_settings(chat_id: int) -> Setting:
         db.commit()
     return s
 
-# ====== Text blocks (help) ======
-HELP_VI = (
-    "🎯 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
-    "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
-
-    "🆓 <b>GÓI FREE</b>\n"
-    "• /filter_add &lt;từ&gt; – Thêm từ khoá cần chặn\n"
-    "• /filter_list – Xem danh sách từ khoá đã chặn\n"
-    "• /filter_del &lt;id&gt; – Xoá filter theo ID\n"
-    "• /antilink_on | /antilink_off – Bật/tắt chặn link\n"
-    "• /antimention_on | /antimention_off – Bật/tắt chặn tag @all / mention\n"
-    "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
-    "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n\n"
-
-    "💎 <b>GÓI PRO</b>\n"
-    "• /pro – Mở bảng hướng dẫn dùng thử & kích hoạt PRO\n"
-    "• /trial – Dùng thử miễn phí 7 ngày\n"
-    "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
-    "• /genkey &lt;days&gt; – (OWNER) Tạo key PRO thời hạn tuỳ chọn\n"
-    "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist link được phép gửi\n"
-    "• /warn – (Admin) Trả lời vào tin có link để cảnh báo / xoá link / tự động chặn khi vi phạm 3 lần\n\n"
-
-    "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
-    "• /ad_on – Bật quảng cáo tự động\n"
-    "• /ad_off – Tắt quảng cáo tự động\n"
-    "• /ad_set &lt;nội dung&gt; – Nội dung quảng cáo\n"
-    "• /ad_interval &lt;phút&gt; – Chu kỳ gửi (mặc định 60)\n"
-    "• /ad_status – Xem trạng thái quảng cáo\n\n"
-
-    "🌐 <b>Ngôn ngữ</b>\n"
-    "• /lang vi – Tiếng Việt | /lang en – English\n\n"
-
-    "⚙️ <b>HỖ TRỢ</b>\n"
-    f"• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
-    "🚀 <i>Cảm ơn bạn đã sử dụng HotroSecurityBot!</i>"
-)
-
-HELP_EN = (
-    "🎯 <b>HotroSecurityBot – Group security assistant</b>\n"
-    "Auto anti-spam, link blocking, warning, and smart promo management.\n\n"
-
-    "🆓 <b>FREE</b>\n"
-    "• /filter_add &lt;word&gt; – Add banned keyword\n"
-    "• /filter_list – List banned keywords\n"
-    "• /filter_del &lt;id&gt; – Delete a filter by ID\n"
-    "• /antilink_on | /antilink_off – Toggle link blocking\n"
-    "• /antimention_on | /antimention_off – Toggle @all/mentions blocking\n"
-    "• /antiforward_on | /antiforward_off – Toggle forwarded messages blocking\n"
-    "• /setflood &lt;n&gt; – Flood limit (default 3)\n\n"
-
-    "💎 <b>PRO</b>\n"
-    "• /pro – How to try & activate PRO\n"
-    "• /trial – 7-day free trial\n"
-    "• /redeem &lt;key&gt; – Redeem PRO key\n"
-    "• /genkey &lt;days&gt; – (OWNER) Generate a key\n"
-    "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Whitelist allowed links\n"
-    "• /warn – (Admin) Reply to a message with a link to warn/delete; auto block after 3 strikes\n\n"
-
-    "📢 <b>AUTO PROMOTION</b>\n"
-    "• /ad_on – Enable auto-promotion\n"
-    "• /ad_off – Disable auto-promotion\n"
-    "• /ad_set &lt;text&gt; – Set promo content\n"
-    "• /ad_interval &lt;minutes&gt; – Interval (default 60)\n"
-    "• /ad_status – Show promo status\n\n"
-
-    "🌐 <b>Language</b>\n"
-    "• /lang vi – Vietnamese | /lang en – English\n\n"
-
-    "⚙️ <b>SUPPORT</b>\n"
-    f"• Contact @{CONTACT_USERNAME or 'Myyduyenng'} for PRO keys & support.\n"
-    "🚀 <i>Thanks for using HotroSecurityBot!</i>"
-)
-
 # ====== Commands FREE ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -177,67 +91,75 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = db.get(User, user.id)
     if not u:
         u = User(id=user.id, username=user.username or "")
-        db.add(u); db.commit()
+        db.add(u)
+        db.commit()
     total = count_users()
-    lang = _get_lang(update)
     msg = (
-        "🤖 <b>HotroSecurityBot</b>\n\n" +
-        t(lang, "start", name=user.first_name, count=total) +
-        ("\n\nType /help to see commands 💬" if lang == "en" else "\n\nGõ /help để xem danh sách lệnh 💬")
+        "🤖 <b>HotroSecurityBot</b>\n\n"
+        f"Chào <b>{user.first_name}</b> 👋\n"
+        f"Hiện có <b>{total:,}</b> người đang sử dụng bot.\n\n"
+        "Gõ /help để xem danh sách lệnh 💬"
     )
     await context.bot.send_message(update.effective_chat.id, msg, parse_mode=ParseMode.HTML)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = _get_lang(update)
-    txt = HELP_EN if lang == "en" else HELP_VI
-    await context.bot.send_message(
-        update.effective_chat.id, txt, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
+    txt = (
+        "🎯 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
+        "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
 
-# ---- /lang command (vi|en) ----
-async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text(
-            "Ngôn ngữ hiện tại: " + _get_lang(update) + "\n/set language: /lang vi | /lang en"
-            if _get_lang(update) != "en"
-            else "Current language: en\nSet language: /lang vi | /lang en"
-        )
-    choice = context.args[0].lower()
-    if choice not in ("vi", "en"):
-        return await update.message.reply_text("Use: /lang vi | /lang en")
-    # lưu theo chat (group) nếu là group, còn private thì theo user
-    if update.effective_chat.type in ("group", "supergroup"):
-        LANG_PREF_CHAT[update.effective_chat.id] = choice
-    else:
-        LANG_PREF_USER[update.effective_user.id] = choice
-    await update.message.reply_text("Đã đổi ngôn ngữ." if choice == "vi" else "Language updated.")
+        "🆓 <b>GÓI FREE</b>\n"
+        "• /filter_add &lt;từ&gt; – Thêm từ khoá cần chặn\n"
+        "• /filter_list – Xem danh sách từ khoá đã chặn\n"
+        "• /filter_del &lt;id&gt; – Xoá filter theo ID\n"
+        "• /antilink_on | /antilink_off – Bật/tắt chặn link\n"
+        "• /antimention_on | /antimention_off – Bật/tắt chặn tag @all / mention\n"
+        "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
+        "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n\n"
+
+        "💎 <b>GÓI PRO</b>\n"
+        "• /pro – Mở bảng hướng dẫn dùng thử & kích hoạt PRO\n"
+        "• /trial – Dùng thử miễn phí 7 ngày\n"
+        "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
+        "• /genkey &lt;days&gt; – (OWNER) Tạo key PRO thời hạn tuỳ chọn\n"
+        "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist link được phép gửi\n"
+        "• /warn – (Admin) Trả lời vào tin có link để cảnh báo / xoá link / tự động chặn khi vi phạm 3 lần\n\n"
+
+        "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
+        "Tính năng hỗ trợ đăng tin quảng cáo tự động theo chu kỳ thời gian.\n"
+        "• /ad_on – Bật quảng cáo tự động cho nhóm\n"
+        "• /ad_off – Tắt quảng cáo tự động\n"
+        "• /ad_set &lt;nội dung&gt; – Đặt nội dung quảng cáo sẽ được bot gửi\n"
+        "• /ad_interval &lt;phút&gt; – Đặt chu kỳ gửi quảng cáo (mặc định 60 phút)\n\n"
+
+        "⚙️ <b>THÔNG TIN & HỖ TRỢ</b>\n"
+        f"• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
+        "• Bot hoạt động 24/7 – phù hợp cho các nhóm Momo, game, trade, chia sẻ link, quảng bá sản phẩm.\n"
+        "• Các tính năng PRO giúp nhóm bạn an toàn, sạch spam và chuyên nghiệp hơn.\n\n"
+
+        "🚀 <i>Cảm ơn bạn đã sử dụng HotroSecurityBot!</i>"
+    )
+    await context.bot.send_message(
+        update.effective_chat.id,
+        txt,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True
+    )
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = count_users()
-    lang = _get_lang(update)
-    text = f"📊 Total users: {total:,}" if lang == "en" else f"📊 Tổng người dùng bot: {total:,}"
-    await update.message.reply_text(text)
+    await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t0 = datetime.now(timezone.utc)
-    lang = _get_lang(update)
-    m = await update.message.reply_text("⏳ Measuring ping…" if lang == "en" else "⏳ Đang đo ping…")
+    m = await update.message.reply_text("⏳ Đang đo ping…")
     dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
     up = datetime.now(timezone.utc) - START_AT
-    text = (
-        f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms"
-        if lang == "vi" else
-        f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms"
-    )
-    await m.edit_text(text)
+    await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
 
 # ====== UPTIME / PING ======
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     up = datetime.now(timezone.utc) - START_AT
-    lang = _get_lang(update)
-    await update.message.reply_text(
-        f"⏱ Uptime: {_fmt_td(up)}" if lang == "en" else f"⏱ Uptime: {_fmt_td(up)}"
-    )
+    await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
 
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t0 = datetime.now(timezone.utc)
@@ -250,34 +172,35 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     chat_id = update.effective_chat.id
     admin_user = update.effective_user
-    lang = _get_lang(update)
 
     if not msg.reply_to_message:
-        return await msg.reply_text("Reply to the message with a link then type /warn"
-                                    if lang == "en" else "Hãy reply vào tin có link rồi gõ /warn")
+        return await msg.reply_text("Hãy reply vào tin có link rồi gõ /warn")
 
+    # Chỉ admin/creator được dùng
     try:
         member = await context.bot.get_chat_member(chat_id, admin_user.id)
         if member.status not in ("administrator", "creator"):
-            return await msg.reply_text("Admins only." if lang == "en" else "Chỉ admin mới dùng lệnh này.")
+            return await msg.reply_text("Chỉ admin mới dùng lệnh này.")
     except Exception:
-        return await msg.reply_text("Cannot check admin rights." if lang == "en" else "Không thể kiểm tra quyền admin.")
+        return await msg.reply_text("Không thể kiểm tra quyền admin.")
 
     target_msg = msg.reply_to_message
     target_user = target_msg.from_user
     text = (target_msg.text or target_msg.caption or "")
 
+    # Nếu tin không có link -> bỏ qua
     if not LINK_RE.search(text):
-        return await msg.reply_text("Replied message has no link." if lang == "en" else "Tin được reply không chứa link.")
+        return await msg.reply_text("Tin được reply không chứa link.")
 
     db = SessionLocal()
 
+    # link thuộc whitelist -> không xử lý
     wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
     if any(d and d.lower() in text.lower() for d in wl):
         db.close()
-        return await msg.reply_text("This domain is whitelisted."
-                                    if lang == "en" else "Domain này nằm trong whitelist, không cảnh báo.")
+        return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
 
+    # Xóa tin gốc & thông báo bản đã loại link
     try:
         await target_msg.delete()
     except Exception:
@@ -285,26 +208,27 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     safe_text = remove_links(text)
     try:
-        await context.bot.send_message(chat_id,
-            f"🔒 Removed link: {safe_text}" if lang == "en" else f"🔒 Tin đã xóa link: {safe_text}")
+        await context.bot.send_message(chat_id, f"🔒 Tin đã xóa link: {safe_text}")
     except Exception:
         pass
 
+    # Cập nhật warning count
     w = db.query(Warning).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
     if not w:
-        w = Warning(chat_id=chat_id, user_id=target_user.id, count=1); db.add(w)
+        w = Warning(chat_id=chat_id, user_id=target_user.id, count=1)
+        db.add(w)
     else:
-        w.count += 1; w.last_warned = func.now()
+        w.count += 1
+        w.last_warned = func.now()
     db.commit()
 
     await context.bot.send_message(
         chat_id,
-        (f"⚠️ <b>Warning:</b> <a href='tg://user?id={target_user.id}'>User</a> shared a disallowed link. ({w.count}/3)")
-        if lang == "en" else
-        (f"⚠️ <b>Cảnh báo:</b> <a href='tg://user?id={target_user.id}'>Người này</a> đã chia sẻ link không được phép. ({w.count}/3)"),
+        f"⚠️ <b>Cảnh báo:</b> <a href='tg://user?id={target_user.id}'>Người này</a> đã chia sẻ link không được phép. ({w.count}/3)",
         parse_mode=ParseMode.HTML
     )
 
+    # đủ 3 lần -> thêm blacklist + (tuỳ chọn) restrict dài hạn
     if w.count >= 3:
         bl = db.query(Blacklist).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
         if not bl:
@@ -313,8 +237,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await context.bot.send_message(
             chat_id,
-            f"🚫 <b>Blacklisted:</b> <a href='tg://user?id={target_user.id}'>User</a>."
-            if lang == "en" else
             f"🚫 <b>Đã đưa vào danh sách đen:</b> <a href='tg://user?id={target_user.id}'>Người này</a>.",
             parse_mode=ParseMode.HTML
         )
@@ -345,17 +267,20 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
+    # Từ khoá cấm
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern and it.pattern.lower() in text.lower():
             try: await msg.delete()
             except Exception: pass
             return
 
+    # Chặn forward
     if s.antiforward and getattr(msg, "forward_origin", None):
         try: await msg.delete()
         except Exception: pass
         return
 
+    # Chặn link (trừ whitelist) — KHÔNG cảnh báo tự động
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         if not any(d and d.lower() in text.lower() for d in wl):
@@ -363,11 +288,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
+    # Chặn mention
     if s.antimention and "@" in text:
         try: await msg.delete()
         except Exception: pass
         return
 
+    # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
     now_ts = datetime.now(timezone.utc).timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
@@ -398,6 +325,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== Startup hook =====
 async def on_startup(app: Application):
+    # Xoá webhook nếu có (tránh Conflict khi chuyển webhook → polling)
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("Webhook cleared, using polling mode.")
@@ -410,6 +338,7 @@ async def on_startup(app: Application):
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
+    # Thông báo khởi động (tùy chọn)
     if OWNER_ID:
         try:
             await app.bot.send_message(
@@ -427,6 +356,7 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
+    # giữ Render thức
     try:
         keep_alive()
     except Exception as e:
@@ -436,13 +366,12 @@ def main():
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # ===== ĐĂNG KÝ HANDLERS =====
-    app.add_handler(CommandHandler("lang", lang_cmd))
+    # ===== ĐĂNG KÝ HANDLERS (các hàm PHẢI được định nghĩa bên trên) =====
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-
+    
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
@@ -458,15 +387,14 @@ def main():
     app.add_handler(CommandHandler("ping", ping_cmd))
 
     app.add_handler(CommandHandler("warn", warn_cmd))
-    register_handlers(app, owner_id=OWNER_ID)   # PRO handlers
-    attach_scheduler(app)                        # Schedulers
+    register_handlers(app, owner_id=OWNER_ID)
+    attach_scheduler(app)
 
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
-
-# ====== FILTERS & TOGGLES (KEEP ORIGINAL BLOCK) ======
+    # ====== FILTERS & TOGGLES (ADD THIS BLOCK) ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text(
@@ -564,11 +492,11 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
-
-# ====== QUẢNG CÁO TỰ ĐỘNG (main side) ======
+        # ====== QUẢNG CÁO TỰ ĐỘNG (HANDLERS) ======
 from core.models import PromoSetting
 
 async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Cho phép ở private; ở group thì phải là admin/creator."""
     chat = update.effective_chat
     user = update.effective_user
     if chat.type == "private":
@@ -577,6 +505,7 @@ async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         m = await context.bot.get_chat_member(chat.id, user.id)
         return m.status in ("administrator", "creator")
     except Exception:
+        # vẫn trả False nhưng handler sẽ trả lời rõ ràng
         return False
 
 def _get_ps(db, chat_id: int) -> PromoSetting:
@@ -612,10 +541,10 @@ async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             minutes = int(context.args[0])
         except ValueError:
             return await update.message.reply_text("Giá trị phút không hợp lệ.")
-        minutes = max(10, minutes)
+        minutes = max(10, minutes)  # min 10p cho an toàn
         ps = _get_ps(db, update.effective_chat.id)
         ps.interval_minutes = minutes
-        ps.last_sent_at = None
+        ps.last_sent_at = None  # ép tick kế tiếp đủ điều kiện sẽ gửi
         db.commit()
         await update.message.reply_text(f"⏱ Chu kỳ quảng cáo: {minutes} phút.")
     finally:
@@ -651,25 +580,18 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         ps = _get_ps(db, update.effective_chat.id)
         last = ps.last_sent_at.isoformat() if ps.last_sent_at else "—"
-
-        msg = (
+        await update.message.reply_text(
             "📊 Trạng thái QC:\n"
-            "• Bật: {on}\n"
-            "• Chu kỳ: {mins} phút\n"
-            "• Nội dung: {content}\n"
-            "• Lần gửi gần nhất: {last}"
-        ).format(
-            on="✅" if ps.is_enabled else "❎",
-            mins=ps.interval_minutes,
-            content=("đã đặt" if ps.content else "—"),
-            last=last,
+            f"• Bật: { '✅' if ps.is_enabled else '❎' }\n"
+            f"• Chu kỳ: {ps.interval_minutes} phút\n"
+            f"• Nội dung: {('đã đặt' if ps.content else '—')}\n"
+            f"• Lần gửi gần nhất: {last}"
         )
-
-        await update.message.reply_text(msg)
     finally:
         db.close()
+# ====== END FILTERS & TOGGLES BLOCK ======
 
-# ====== END BLOCK ======
+
 
 if __name__ == "__main__":
     main()
