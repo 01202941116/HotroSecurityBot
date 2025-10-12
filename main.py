@@ -47,6 +47,17 @@ def _fmt_td(td: timedelta) -> str:
     parts.append(f"{s}s")
     return " ".join(parts)
 
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total = count_users()
+    await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
+
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    t0 = datetime.utcnow()
+    m = await update.message.reply_text("⏳ Đang đo ping…")
+    dt = (datetime.utcnow() - t0).total_seconds() * 1000
+    up = datetime.utcnow() - START_AT
+    await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
+
 
 # ====== ENV ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -86,7 +97,21 @@ def get_settings(chat_id: int) -> Setting:
 
 # ====== Commands FREE ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(update.effective_chat.id, "Xin chào! Gõ /help để xem lệnh.")
+    user = update.effective_user
+    db = SessionLocal()
+    u = db.get(User, user.id)
+    if not u:
+        u = User(id=user.id, username=user.username or "")
+        db.add(u)
+        db.commit()
+    total = count_users()
+    msg = (
+        "🤖 <b>HotroSecurityBot</b>\n\n"
+        f"Chào <b>{user.first_name}</b> 👋\n"
+        f"Hiện có <b>{total:,}</b> người đang sử dụng bot.\n\n"
+        "Gõ /help để xem danh sách lệnh 💬"
+    )
+    await context.bot.send_message(update.effective_chat.id, msg, parse_mode=ParseMode.HTML)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -360,6 +385,9 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        print("Conflict ignored (another instance was running).")
+        return
     err = repr(context.error)
     print("ERROR:", err)
     try:
@@ -376,14 +404,13 @@ from telegram.error import Conflict  # thêm dòng này
 
 # ===== Startup hook =====
 async def on_startup(app: Application):
-    # 1) XÓA WEBHOOK (nếu có) + bỏ hàng đợi cũ
+    # Xoá webhook nếu có (tránh Conflict khi chuyển webhook → polling)
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("Webhook cleared, using polling mode.")
     except Exception as e:
         print("delete_webhook warn:", e)
 
-    # phần cũ của bạn
     try:
         me = await app.bot.get_me()
         app.bot_data["contact"] = me.username or CONTACT_USERNAME
@@ -420,6 +447,8 @@ def main():
     app.add_error_handler(on_error)
 
     # FREE
+    app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("filter_add", filter_add))
