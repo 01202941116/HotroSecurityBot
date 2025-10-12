@@ -328,6 +328,40 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("ad_off", ad_off))
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
+    app.add_handler(CommandHandler("ad_status", ad_status))
+# ----------- Trạng thái quảng cáo (/ad_status) -----------
+from datetime import timezone as _tz
+
+def _fmt_ts(dt):
+    if not dt:
+        return "—"
+    try:
+        return dt.astimezone(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return str(dt)
+
+async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        chat_id = update.effective_chat.id
+        s = db.query(PromoSetting).filter_by(chat_id=chat_id).one_or_none()
+
+        if not s:
+            await update.message.reply_text("📊 Chưa cấu hình quảng cáo cho cuộc trò chuyện này.")
+            return
+
+        msg = (
+            "📊 <b>Trạng thái QC</b>\n"
+            f"• Bật: {'✅' if s.is_enabled else '❎'}\n"
+            f"• Chu kỳ: {s.interval_minutes} phút\n"
+            f"• Nội dung: {'đã đặt' if (s.content or '').strip() else '—'}\n"
+            f"• Lần gửi gần nhất: {_fmt_ts(s.last_sent_at)}"
+        )
+        await update.message.reply_text(
+            msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+    finally:
+        db.close()
 
     # ❗ Không đăng ký job ở đây nữa. Job quảng cáo đã chạy trong pro/scheduler.py
     # để tránh trùng job và lỗi.
