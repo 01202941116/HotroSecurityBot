@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import timedelta
+from datetime import timedelta, timezone as _tz
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -14,10 +14,18 @@ from core.models import (
     LicenseKey,
     Trial,
     Whitelist,
-    PromoSetting,   # cần có model này: chat_id, enabled(bool), text(str), interval_min(int, default=60), last_sent_at(DateTime|null)
+    PromoSetting,
     add_days,
     now_utc,
 )
+
+# ====== Fix timezone-safe ======
+def ensure_aware(dt):
+    """Trả về datetime có tzinfo=UTC nếu chưa có."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+
 
 HELP_PRO = (
     "<b>Gói PRO</b>\n"
@@ -64,29 +72,38 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         user = _ensure_user(db, u.id, u.username)
+        now = now_utc()
 
         # đang PRO còn hạn -> báo lại
-        if user.is_pro and user.pro_expires_at and user.pro_expires_at > now_utc():
-            remain = user.pro_expires_at - now_utc()
+        exp = ensure_aware(user.pro_expires_at)
+        if user.is_pro and exp and exp > now:
+            remain = exp - now
             days = max(0, remain.days)
             return await update.message.reply_text(f"✅ Bạn đang là PRO. Còn ~ {days} ngày.")
 
         # đã từng trial & kết thúc -> không cho lại
         t = db.query(Trial).filter_by(user_id=u.id).one_or_none()
-        if t and not t.active:
-            return await update.message.reply_text("❗ Bạn đã dùng thử trước đó.")
+        if t:
+            t_exp = ensure_aware(t.expires_at)
+            if t.active and t_exp and t_exp > now:
+                remain = t_exp - now
+                d, h = remain.days, remain.seconds // 3600
+                return await update.message.reply_text(f"✅ Bạn đang dùng thử, còn {d} ngày {h} giờ.")
+            if not t.active:
+                return await update.message.reply_text("❗ Bạn đã dùng thử trước đó.")
 
         # cấp trial 7 ngày
+        exp_new = now + timedelta(days=7)
         if not t:
-            t = Trial(user_id=u.id, started_at=now_utc(), expires_at=add_days(7), active=True)
+            t = Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True)
             db.add(t)
         else:
-            t.started_at = now_utc()
-            t.expires_at = add_days(7)
+            t.started_at = now
+            t.expires_at = exp_new
             t.active = True
 
         user.is_pro = True
-        user.pro_expires_at = t.expires_at
+        user.pro_expires_at = exp_new
         db.commit()
         await update.message.reply_text("✅ Đã kích hoạt dùng thử 7 ngày!")
     finally:
@@ -275,15 +292,14 @@ async def _promo_tick(context: ContextTypes.DEFAULT_TYPE):
         for s in enabled:
             if not s.text:
                 continue
+            last = ensure_aware(s.last_sent_at)
             interval = (s.interval_min or 60) * 60
-            last = s.last_sent_at or (now - timedelta(days=365))
-            if (now - last).total_seconds() >= interval:
+            if last is None or (now - last).total_seconds() >= interval:
                 try:
                     await context.bot.send_message(s.chat_id, s.text, disable_web_page_preview=True)
                     s.last_sent_at = now
                     db.commit()
                 except Exception:
-                    # không phá vòng lặp nếu 1 nhóm lỗi
                     db.rollback()
                     continue
     finally:
@@ -292,24 +308,20 @@ async def _promo_tick(context: ContextTypes.DEFAULT_TYPE):
 # ------------------------ Register ------------------------
 
 def register_handlers(app: Application, owner_id: int | None = None):
-    # menu & PRO
     app.add_handler(CommandHandler("pro", pro_cmd))
     app.add_handler(CommandHandler("trial", trial_cmd))
     app.add_handler(CommandHandler("redeem", redeem_cmd))
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
 
-    # whitelist (admin)
     app.add_handler(CommandHandler("wl_add", wl_add))
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
 
-    # quảng cáo tự động (admin)
     app.add_handler(CommandHandler("ad_on", ad_on))
     app.add_handler(CommandHandler("ad_off", ad_off))
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
 
-    # job queue: check mỗi 60 giây
     if app.job_queue and not app.bot_data.get("promo_job_installed"):
         app.job_queue.run_repeating(_promo_tick, interval=60, name="promo_tick", first=10)
         app.bot_data["promo_job_installed"] = True
