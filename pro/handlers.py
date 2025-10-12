@@ -1,5 +1,6 @@
 # pro/handlers.py
 from __future__ import annotations
+from core.lang import t
 
 import secrets
 from datetime import timedelta, timezone as _tz
