@@ -438,9 +438,9 @@ def main():
 
     # Giữ bot sống (Render)
     try:
-        keep_alive()
-    except Exception as e:
-        print("Lỗi keep_alive:", e)
+    keep_alive()
+except Exception as e:
+    print("Lỗi keep_alive:", e)
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = on_startup
