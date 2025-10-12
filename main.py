@@ -4,7 +4,8 @@ sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
 from datetime import datetime, timedelta
-
+from telegram.error import Conflict  # để lọc lỗi Conflict
+from core.models import init_db, SessionLocal, Setting, Filter, Whitelist, User, count_users
 from telegram import Update, ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
