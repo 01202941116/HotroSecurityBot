@@ -108,3 +108,16 @@ def attach_scheduler(app):
         print("✅ JobQueue: promo_tick mỗi 60 giây")
     except Exception as e:
         print("❌ Lỗi attach JobQueue promo_tick:", e)
+        # ==== Datetime helpers (UTC-aware) ====
+from datetime import timezone as _tz
+
+def ensure_aware(dt):
+    """Trả về datetime có tzinfo=UTC. Nếu None giữ nguyên."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+
+def now_utc():
+    # GIỮ HÀNH VI UTC-AWARE
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
