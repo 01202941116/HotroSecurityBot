@@ -371,7 +371,8 @@ def main():
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    
+    app.add_handler(CommandHandler("lang", lang_cmd))
+
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
