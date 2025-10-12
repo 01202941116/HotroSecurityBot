@@ -1,19 +1,25 @@
 # keep_alive_server.py
+import os
 from flask import Flask
 from threading import Thread
 
-# Tạo Flask app
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
     return "Bot is alive!"
 
-# Chạy webserver để Render giữ bot online
-def run():
-    app.run(host='0.0.0.0', port=8080)
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
 
-# Hàm gọi song song, giúp bot không bị sleep
+def _run():
+    # Render sẽ đặt PORT vào biến môi trường, nếu không có thì dùng 8080
+    port = int(os.getenv("PORT", "8080"))
+    # debug=False để tránh log quá nhiều; threaded=True cho phép xử lý đồng thời
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
 def keep_alive():
-    t = Thread(target=run)
+    # Daemon để thread webserver tự tắt theo tiến trình chính
+    t = Thread(target=_run, daemon=True)
     t.start()
