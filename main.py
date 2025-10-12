@@ -3,45 +3,41 @@ import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
-from datetime import datetime, timezone
-from telegram.error import Conflict  # để lọc lỗi Conflict
-from core.models import init_db, SessionLocal, Setting, Filter, Whitelist, User, count_users
-from telegram import Update, ChatPermissions
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from telegram.constants import ParseMode
-
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
-from core.models import (
-    init_db, SessionLocal,
-    Setting, Filter, Whitelist,
-    Warning, Blacklist,  # yêu cầu có trong core.models
+
+from telegram import Update, ChatPermissions
+from telegram.constants import ParseMode
+from telegram.error import Conflict
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    ContextTypes, filters
 )
-from keep_alive_server import keep_alive  # ở đầu file nếu chưa import
-if __name__ == "__main__":
-    keep_alive()  # Chạy Flask để giữ Render hoạt động
-    # Chạy bot
-    app.run_polling(timeout=60)
-def main():
-    if not BOT_TOKEN:
-        raise SystemExit("❌ Missing BOT_TOKEN")
 
-    init_db()
+# ====== LOCAL MODELS ======
+from core.models import (
+    init_db, SessionLocal, Setting, Filter, Whitelist,
+    User, count_users, Warning, Blacklist
+)
 
-    # Bật web-keepalive để Render không sleep & UptimeRobot kiểm tra được
-    try:
-        keep_alive()
-    except Exception as e:
-        print("keep_alive warn:", e)
+# ====== KEEP ALIVE WEB ======
+from keep_alive_server import keep_alive
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.post_init = on_startup
-    app.add_error_handler(on_error)
+# ====== ENV ======
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
-    # ... add handlers như hiện tại ...
+# ====== STATE / REGEX ======
+FLOOD = {}
+LINK_RE = re.compile(
+    r"(https?://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co)(/[^\s]*)?)",
+    re.IGNORECASE
+)
 
-    # Dọn update cũ tránh “terminated by other getUpdates request”
-    app.run_polling(drop_pending_updates=True)
-
+def remove_links(text: str) -> str:
+    """Thay mọi link bằng [link bị xóa] nhưng giữ lại chữ mô tả."""
+    return re.sub(LINK_RE, "[link bị xóa]", text or "")
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
@@ -55,7 +51,6 @@ try:
 except Exception as e:
     print("pro.scheduler warn:", e)
     attach_scheduler = lambda app: None
-
 
 # ====== UPTIME UTILS ======
 START_AT = datetime.now(timezone.utc)
@@ -71,36 +66,6 @@ def _fmt_td(td: timedelta) -> str:
     if m: parts.append(f"{m}m")
     parts.append(f"{s}s")
     return " ".join(parts)
-
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total = count_users()
-    await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
-
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t0 = datetime.utcnow()
-    m = await update.message.reply_text("⏳ Đang đo ping…")
-    dt = (datetime.utcnow() - t0).total_seconds() * 1000
-    up = datetime.utcnow() - START_AT
-    await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
-
-
-# ====== ENV ======
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
-
-
-# ====== STATE / REGEX ======
-FLOOD = {}
-LINK_RE = re.compile(
-    r"(https?://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co)(/[^\s]*)?)",
-    re.IGNORECASE
-)
-
-def remove_links(text: str) -> str:
-    """Thay mọi link bằng [link bị xóa] nhưng giữ lại chữ mô tả."""
-    return re.sub(LINK_RE, "[link bị xóa]", text or "")
-
 
 # ====== Helpers ======
 def get_settings(chat_id: int) -> Setting:
@@ -118,7 +83,6 @@ def get_settings(chat_id: int) -> Setting:
         db.add(s)
         db.commit()
     return s
-
 
 # ====== Commands FREE ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,13 +132,12 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /ad_interval &lt;phút&gt; – Đặt chu kỳ gửi quảng cáo (mặc định 60 phút)\n\n"
 
         "⚙️ <b>THÔNG TIN & HỖ TRỢ</b>\n"
-        "• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
+        f"• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
         "• Bot hoạt động 24/7 – phù hợp cho các nhóm Momo, game, trade, chia sẻ link, quảng bá sản phẩm.\n"
         "• Các tính năng PRO giúp nhóm bạn an toàn, sạch spam và chuyên nghiệp hơn.\n\n"
 
         "🚀 <i>Cảm ơn bạn đã sử dụng HotroSecurityBot!</i>"
     )
-
     await context.bot.send_message(
         update.effective_chat.id,
         txt,
@@ -182,86 +145,27 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML")
-    pattern = " ".join(context.args).strip()
-    if not pattern:
-        return await update.message.reply_text("Từ khoá rỗng.")
-    db = SessionLocal()
-    f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
-    db.add(f)
-    db.commit()
-    await update.message.reply_text(f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode="HTML")
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total = count_users()
+    await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
 
-async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db = SessionLocal()
-    items = db.query(Filter).filter_by(chat_id=update.effective_chat.id).all()
-    if not items:
-        return await update.message.reply_text("Danh sách filter trống.")
-    out = ["<b>Filters:</b>"] + [f"{i.id}. <code>{i.pattern}</code>" for i in items]
-    await update.message.reply_text("\n".join(out), parse_mode=ParseMode.HTML)
-
-async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Cú pháp: /filter_del <id>")
-    try:
-        fid = int(context.args[0])
-    except ValueError:
-        return await update.message.reply_text("ID không hợp lệ.")
-    db = SessionLocal()
-    it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
-    if not it:
-        return await update.message.reply_text("Không tìm thấy ID.")
-    db.delete(it)
-    db.commit()
-    await update.message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
-
-async def toggle(update: Update, field: str, val: bool, label: str):
-    db = SessionLocal()
-    s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
-    if not s:
-        s = Setting(chat_id=update.effective_chat.id)
-        db.add(s)
-    setattr(s, field, val)
-    db.commit()
-    await update.message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
-
-async def antilink_on(update, context):     await toggle(update, "antilink", True,  "Anti-link")
-async def antilink_off(update, context):    await toggle(update, "antilink", False, "Anti-link")
-async def antimention_on(update, context):  await toggle(update, "antimention", True,  "Anti-mention")
-async def antimention_off(update, context): await toggle(update, "antimention", False, "Anti-mention")
-async def antiforward_on(update, context):  await toggle(update, "antiforward", True,  "Anti-forward")
-async def antiforward_off(update, context): await toggle(update, "antiforward", False, "Anti-forward")
-
-async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Cú pháp: /setflood <số tin>")
-    try:
-        n = max(2, int(context.args[0]))
-    except ValueError:
-        return await update.message.reply_text("Giá trị không hợp lệ.")
-    db = SessionLocal()
-    s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
-    if not s:
-        s = Setting(chat_id=update.effective_chat.id)
-        db.add(s)
-    s.flood_limit = n
-    db.commit()
-    await update.message.reply_text(f"✅ Flood limit = {n}")
-
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    t0 = datetime.now(timezone.utc)
+    m = await update.message.reply_text("⏳ Đang đo ping…")
+    dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
+    up = datetime.now(timezone.utc) - START_AT
+    await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
 
 # ====== UPTIME / PING ======
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    up = datetime.utcnow() - START_AT
+    up = datetime.now(timezone.utc) - START_AT
     await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
 
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t0 = datetime.utcnow()
+    t0 = datetime.now(timezone.utc)
     m = await update.message.reply_text("Pinging…")
-    dt = (datetime.utcnow() - t0).total_seconds() * 1000
+    dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
     await m.edit_text(f"🏓 Pong: {dt:.0f} ms")
-
 
 # ====== PRO: Admin reply → /warn ======
 async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -338,7 +242,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
-            until = datetime.now() + timedelta(days=365*10)
+            until = datetime.now(timezone.utc) + timedelta(days=365*10)
             await context.bot.restrict_chat_member(
                 chat_id, target_user.id,
                 ChatPermissions(can_send_messages=False),
@@ -348,7 +252,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     db.close()
-
 
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -393,12 +296,12 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
-    now = datetime.now().timestamp()
-    bucket = [t for t in FLOOD.get(key, []) if now - t < 10]
-    bucket.append(now); FLOOD[key] = bucket
+    now_ts = datetime.now(timezone.utc).timestamp()
+    bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
+    bucket.append(now_ts); FLOOD[key] = bucket
     if len(bucket) > s.flood_limit and s.flood_mode == "mute":
         try:
-            until = datetime.now() + timedelta(minutes=5)
+            until = datetime.now(timezone.utc) + timedelta(minutes=5)
             await context.bot.restrict_chat_member(
                 chat_id, msg.from_user.id,
                 ChatPermissions(can_send_messages=False),
@@ -406,7 +309,6 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
-
 
 # ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -420,12 +322,6 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(OWNER_ID, f"⚠️ Error:\n<code>{err}</code>", parse_mode=ParseMode.HTML)
     except Exception as e:
         print("owner notify fail:", e)
-
-
-# ====== Startup hook ======
-from telegram.error import Conflict  # thêm dòng này
-
-# ... (giữ nguyên phần import khác)
 
 # ===== Startup hook =====
 async def on_startup(app: Application):
@@ -452,7 +348,6 @@ async def on_startup(app: Application):
         except Exception as e:
             print("⚠️ Notify owner failed:", e)
 
-
 # ====== Main ======
 def main():
     if not BOT_TOKEN:
@@ -461,11 +356,11 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
-    # Giữ bot sống (Render)
-try:
-    keep_alive()
-except Exception as e:
-    print("Lỗi keep_alive:", e)
+    # Giữ Render thức
+    try:
+        keep_alive()
+    except Exception as e:
+        print("Lỗi keep_alive:", e)
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = on_startup
@@ -500,8 +395,7 @@ except Exception as e:
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
-    app.run_polling(drop_pending_updates=True)
-
+    app.run_polling(drop_pending_updates=True, timeout=60)
 
 if __name__ == "__main__":
     main()
