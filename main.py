@@ -4,6 +4,7 @@ sys.modules.pop("core.models", None)
 import os, re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
+from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
@@ -112,8 +113,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     total = count_users()
     lang = USER_LANG.get(user.id, "vi")
+
+    # ===== Tạo nút chọn ngôn ngữ =====
+    keyboard = [
+        [
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # ===== Gửi lời chào =====
     msg = t(lang, "start", name=user.first_name, count=total)
-    await context.bot.send_message(update.effective_chat.id, msg, parse_mode=ParseMode.HTML)
+    msg += "\n\n🌐 Chọn ngôn ngữ / Choose language:"
+    await context.bot.send_message(
+        update.effective_chat.id,
+        msg,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
 
 # ====== STATUS / STATS ======
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -187,6 +205,7 @@ def main():
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
     app.add_handler(CommandHandler("uptime", uptime_cmd))
+    app.add_handler(CallbackQueryHandler(on_lang_button))
 
     # Có thể giữ nguyên các handler khác (filter_add, warn, ad_on...) của bạn ở đây
 
