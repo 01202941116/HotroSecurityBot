@@ -113,6 +113,27 @@ def count_users(session=None) -> int:
     s = session or SessionLocal()
     try:
         return s.query(User).count()
+        # core/models.py
+from datetime import datetime, timezone
+from sqlalchemy import Column, Integer, BigInteger, Boolean, Text, DateTime
+# ... các import khác ...
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+class PromoSetting(Base):
+    __tablename__ = "promo_settings"
+
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
+
+    is_enabled = Column(Boolean, default=False)        # /ad_on | /ad_off
+    content = Column(Text, default="")                 # /ad_set <nội dung>
+    interval_minutes = Column(Integer, default=60)     # /ad_interval <phút>
+
+    # >>> THÊM CỘT NÀY <<<
+    last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
+
     finally:
         if session is None:
             s.close()
