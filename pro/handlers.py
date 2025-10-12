@@ -326,3 +326,21 @@ def register_handlers(app: Application, owner_id: int | None = None):
         app.job_queue.run_repeating(_promo_tick, interval=60, name="promo_tick", first=10)
         app.bot_data["promo_job_installed"] = True
         print("[pro] promo_tick job installed")
+        # pro/handlers.py (thêm vào đầu file, bên cạnh imports)
+from datetime import timezone as _tz
+
+def _aware(dt):
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+
+def _has_active_pro(db, user_id: int) -> bool:
+    now = now_utc()
+    u = db.query(User).filter_by(id=user_id).one_or_none()
+    if u and u.is_pro and _aware(u.pro_expires_at) and _aware(u.pro_expires_at) > now:
+        return True
+    t = db.query(Trial).filter_by(user_id=user_id, active=True).one_or_none()
+    if t and _aware(t.expires_at) and _aware(t.expires_at) > now:
+        return True
+    return False
+
