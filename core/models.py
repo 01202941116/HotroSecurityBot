@@ -103,3 +103,10 @@ def now_utc():
 
 def add_days(d: int):
     return now_utc() + timedelta(days=d)
+    def count_users():
+    db = SessionLocal()
+    try:
+        return db.query(User).count()
+    finally:
+        db.close()
+
