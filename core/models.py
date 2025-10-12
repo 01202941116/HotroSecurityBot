@@ -1,22 +1,25 @@
+# core/models.py
 from datetime import datetime, timedelta
-from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
-    BigInteger, func  # <-- thêm BigInteger, func vào đây
-)
-from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 
+from sqlalchemy import (
+    create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
+    BigInteger, func
+)
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# ===== DB CONFIG =====
 DB_URL = os.getenv("LICENSE_DB_URL", "sqlite:///licenses.db")
 
 engine = create_engine(DB_URL, future=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 Base = declarative_base()
 
-# ===== Entities =====
+# ===== ENTITIES =====
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)            # telegram user id
+    id = Column(Integer, primary_key=True)           # telegram user id
     username = Column(String, nullable=True)
     is_pro = Column(Boolean, default=False)
     pro_expires_at = Column(DateTime, nullable=True)
@@ -42,13 +45,13 @@ class Trial(Base):
 class Filter(Base):
     __tablename__ = "filters"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, index=True)
+    chat_id = Column(BigInteger, index=True)
     pattern = Column(String, index=True)
 
 class Setting(Base):
     __tablename__ = "settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, unique=True, index=True)
+    chat_id = Column(BigInteger, unique=True, index=True)
     antilink = Column(Boolean, default=True)
     antimention = Column(Boolean, default=True)
     antiforward = Column(Boolean, default=True)
@@ -58,21 +61,22 @@ class Setting(Base):
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, index=True)
+    chat_id = Column(BigInteger, index=True)
     domain = Column(String, index=True)
 
 class Captcha(Base):
     __tablename__ = "captcha"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, index=True)
-    user_id = Column(Integer, index=True)
+    chat_id = Column(BigInteger, index=True)
+    user_id = Column(BigInteger, index=True)
     answer = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 # ==== Auto Promo ====
 class PromoSetting(Base):
     __tablename__ = "promo_settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, unique=True, index=True)
+    chat_id = Column(BigInteger, unique=True, index=True)
     enabled = Column(Boolean, default=False)
     text = Column(String, default="🎯 Tham gia gói PRO để mở khoá đầy đủ tính năng!")
     interval_min = Column(Integer, default=360)  # 6 giờ
@@ -89,11 +93,11 @@ class Warning(Base):
 class Blacklist(Base):
     __tablename__ = "blacklists"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, index=True)
-    user_id = Column(Integer, index=True)
+    chat_id = Column(BigInteger, index=True)
+    user_id = Column(BigInteger, index=True)
     created_at = Column(DateTime, default=func.now())
 
-# ===== Utils =====
+# ===== UTILS =====
 
 def init_db():
     Base.metadata.create_all(engine)
@@ -103,29 +107,12 @@ def now_utc():
 
 def add_days(d: int):
     return now_utc() + timedelta(days=d)
-    def count_users():
-    db = SessionLocal()
-    try:
-        return db.query(User).count()
-    finally:
-        db.close()
-# ===== Utils =====
-def init_db():
-    Base.metadata.create_all(engine)
 
-def now_utc():
-    return datetime.utcnow()
-
-def add_days(d: int):
-    return now_utc() + timedelta(days=d)
-
-# Đếm số User (dùng cho hiển thị thống kê)
 def count_users(session=None) -> int:
-    """Return total users in DB. If no session provided, create a temp one."""
+    """Đếm tổng số người dùng (User) trong CSDL."""
     s = session or SessionLocal()
     try:
         return s.query(User).count()
     finally:
         if session is None:
             s.close()
-
