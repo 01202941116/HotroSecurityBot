@@ -1,10 +1,10 @@
 # core/models.py
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import os
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
-    BigInteger, func, inspect, text
+    BigInteger, func, inspect, text, Text   # <-- THÊM Text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -18,8 +18,11 @@ Base = declarative_base()
 
 # ====== UTILS ======
 def now_utc():
-    """Datetime timezone-aware (UTC)."""
-    return datetime.now(timezone.utc)
+    """
+    Datetime UTC dạng NAIVE (không timezone info).
+    Tránh lỗi: "can't compare offset-naive and offset-aware datetimes".
+    """
+    return datetime.utcnow()
 
 def add_days(d: int):
     return now_utc() + timedelta(days=d)
@@ -88,13 +91,17 @@ class PromoSetting(Base):
     id = Column(Integer, primary_key=True)
     chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
+    # Field mới (đồng nhất với code)
     is_enabled = Column(Boolean, default=False)
     content = Column(Text, default="")
     interval_minutes = Column(Integer, default=60)
-    last_sent_at = Column(DateTime(timezone=True), nullable=True, default=None)
 
-    # Lưu ý: nếu DB cũ vẫn còn các cột cũ (enabled/text/interval_min) thì
-    # init_db() phía dưới sẽ tự thêm các cột mới và copy dữ liệu (nếu có).
+    # Dùng NAIVE timestamp để khớp now_utc()
+    last_sent_at = Column(DateTime, nullable=True, default=None)
+
+    # Ghi chú: nếu DB cũ còn cột legacy (enabled/text/interval_min),
+    # init_db() sẽ thêm cột mới và copy dữ liệu sang.
+
 
 # ===== Warning & Blacklist =====
 class Warning(Base):
@@ -118,7 +125,6 @@ def init_db():
     """Tạo bảng và tự migrate nhẹ cho promo_settings."""
     Base.metadata.create_all(bind=engine)
 
-    # --- Tự thêm các cột mới cho promo_settings nếu thiếu ---
     try:
         insp = inspect(engine)
         cols = {c["name"] for c in insp.get_columns("promo_settings")}
@@ -142,20 +148,22 @@ def init_db():
                     "ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"
                 ))
 
-            # Nếu bảng cũ có cột legacy (enabled/text/interval_min) → copy sang cột mới
-            cols = {c["name"] for c in insp.get_columns("promo_settings")}
-            if {"enabled", "is_enabled"}.issubset(cols):
+            # Copy dữ liệu từ cột legacy (nếu tồn tại)
+            # (re-inspect để chắc chắn có cột vừa thêm)
+            cols = {c["name"] for c in inspect(engine).get_columns("promo_settings")}
+            if "enabled" in cols and "is_enabled" in cols:
                 conn.execute(text(
                     "UPDATE promo_settings SET is_enabled = COALESCE(is_enabled, enabled)"
                 ))
-            if {"text", "content"}.issubset(cols):
+            if "text" in cols and "content" in cols:
                 conn.execute(text(
                     "UPDATE promo_settings SET content = COALESCE(NULLIF(content, ''), text)"
                 ))
-            if {"interval_min", "interval_minutes"}.issubset(cols):
+            if "interval_min" in cols and "interval_minutes" in cols:
                 conn.execute(text(
                     "UPDATE promo_settings SET interval_minutes = COALESCE(interval_minutes, interval_min)"
                 ))
+
     except Exception as e:
         # Không để crash nếu DB không hỗ trợ ALTER TABLE
         print("[migrate] promo_settings migration note:", e)
