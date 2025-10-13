@@ -1,3 +1,4 @@
+# main.py
 import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
@@ -254,7 +255,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add(w)
     else:
         w.count += 1
-        w.last_warned = utcnow()  # dùng UTC-aware
+        w.last_warned = utcnow()  # UTC-aware
     db.commit()
 
     await context.bot.send_message(
@@ -297,7 +298,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.effective_chat.id
     text = (msg.text or msg.caption or "")
-    low = text.lower()
+    low = (text or "").lower()
 
     db = SessionLocal()
     s = get_settings(chat_id)
@@ -318,7 +319,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Chặn link (trừ whitelist)
-    if s.antilink and LINK_RE.search(text):
+    if s.antilink and LINK_RE.search(text or ""):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         if not any(d and d.lower() in low for d in wl):
             try: await msg.delete()
@@ -327,7 +328,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # Chặn mention
-    if s.antimention and "@" in text:
+    if s.antimention and "@" in (text or ""):
         try: await msg.delete()
         except Exception: pass
         db.close()
@@ -410,10 +411,8 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("lang", lang_cmd))
 
-    # Whitelist (FREE, admin)
+    # Whitelist (FREE: chỉ wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
-    app.add_handler(CommandHandler("wl_del", wl_del))
-    app.add_handler(CommandHandler("wl_list", wl_list))
 
     # Filters & toggles (FREE, admin)
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -564,16 +563,22 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 # ====== WHITELIST (FREE, ADMIN) ======
+def _extract_domain(raw: str) -> str:
+    v = (raw or "").lower().strip()
+    v = re.sub(r"^https?://", "", v)
+    v = v.split("/")[0].strip()
+    v = v.removeprefix("www.")
+    return v
+
 async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin(update, context):
         return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /wl_add <domain>", parse_mode=ParseMode.HTML)
-    domain = context.args[0].lower().strip()
-    if domain.startswith("http"):
-        # lấy hostname nếu user dán URL
-        domain = re.sub(r"^https?://", "", domain)
-    domain = domain.strip("/")
+    domain = _extract_domain(context.args[0])
+
+    if not domain or "." not in domain:
+        return await update.message.reply_text("Domain không hợp lệ.")
 
     db = SessionLocal()
     try:
@@ -582,41 +587,6 @@ async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("Đã có trong whitelist.")
         db.add(Whitelist(chat_id=update.effective_chat.id, domain=domain))
         db.commit()
-        await update.message.reply_text(f"wl_added")
+        await update.message.reply_text("wl_added")
     finally:
         db.close()
-
-async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin(update, context):
-        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
-    if not context.args:
-        return await update.message.reply_text("Cú pháp: /wl_del <domain>", parse_mode=ParseMode.HTML)
-    domain = context.args[0].lower().strip().strip("/")
-
-    db = SessionLocal()
-    try:
-        it = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
-        if not it:
-            return await update.message.reply_text("Không tìm thấy trong whitelist.")
-        db.delete(it)
-        db.commit()
-        await update.message.reply_text("wl_deleted")
-    finally:
-        db.close()
-
-async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin(update, context):
-        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
-    db = SessionLocal()
-    try:
-        items = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id).all()
-        if not items:
-            return await update.message.reply_text("Whitelist trống.")
-        out = "\n".join(f"• {i.domain}" for i in items)
-        await update.message.reply_text(out, disable_web_page_preview=True)
-    finally:
-        db.close()
-
-# ====== Entrypoint ======
-if __name__ == "__main__":
-    main()
