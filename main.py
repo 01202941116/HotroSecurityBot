@@ -4,7 +4,6 @@ sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import func  # vẫn giữ nếu nơi khác còn dùng
 
 from telegram import (
     Update, ChatPermissions,
@@ -46,17 +45,17 @@ def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
 
 # ====== TZ-SAFE HELPERS ======
-def utcnow():
+def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-def to_utc_aware(dt):
+def to_utc_aware(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
-    from pro.handlers import register_handlers
+    from pro.handlers import register_handlers  # CHỈ đăng ký wl_del, wl_list, pro...
 except Exception as e:
     print("pro.handlers warn:", e)
     register_handlers = lambda app, **kw: None
@@ -101,10 +100,7 @@ def get_settings(chat_id: int) -> Setting:
 
 # ====== ADMIN CHECK ======
 async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """
-    Private chat: luôn cho phép.
-    Group/SuperGroup: chỉ admin/creator mới được dùng lệnh quản trị.
-    """
+    """Private chat: cho phép; Group: chỉ admin/creator."""
     chat = update.effective_chat
     if chat and chat.type == "private":
         return True
@@ -114,11 +110,10 @@ async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     except Exception:
         return False
 
-# ====== Chọn ngôn ngữ (lưu tạm theo user) ======
+# ====== Chọn ngôn ngữ (RAM) ======
 USER_LANG = {}  # {user_id: "vi"|"en"}
 
 async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý các nút Languages / chọn ngôn ngữ."""
     q = update.callback_query
     await q.answer()
     data = (q.data or "").strip()
@@ -179,7 +174,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Đổi ngôn ngữ bằng lệnh: /lang vi | /lang en"""
+    """Đổi ngôn ngữ: /lang vi | /lang en"""
     lang_now = USER_LANG.get(update.effective_user.id, "vi")
     if not context.args:
         return await update.message.reply_text(LANG[lang_now]["lang_usage"])
@@ -195,20 +190,20 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t0 = datetime.now(timezone.utc)
+    t0 = utcnow()
     m = await update.message.reply_text("⏳ Đang đo ping…")
-    dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-    up = datetime.now(timezone.utc) - START_AT
+    dt = (utcnow() - t0).total_seconds() * 1000
+    up = utcnow() - START_AT
     await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
 
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    up = datetime.now(timezone.utc) - START_AT
+    up = utcnow() - START_AT
     await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
 
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t0 = datetime.now(timezone.utc)
+    t0 = utcnow()
     m = await update.message.reply_text("Pinging…")
-    dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
+    dt = (utcnow() - t0).total_seconds() * 1000
     await m.edit_text(f"🏓 Pong: {dt:.0f} ms")
 
 # ====== PRO: Admin reply → /warn ======
@@ -257,7 +252,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add(w)
     else:
         w.count += 1
-        w.last_warned = utcnow()  # dùng UTC-aware
+        w.last_warned = utcnow()
     db.commit()
 
     await context.bot.send_message(
@@ -279,7 +274,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
-            until = datetime.now(timezone.utc) + timedelta(days=365*10)
+            until = utcnow() + timedelta(days=365*10)
             await context.bot.restrict_chat_member(
                 chat_id, target_user.id,
                 ChatPermissions(can_send_messages=False),
@@ -290,7 +285,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.close()
 
-# ====== Guard (lọc tin nhắn thường) ======
+# ====== Guard (lọc tin thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
@@ -338,12 +333,12 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
-    now_ts = datetime.now(timezone.utc).timestamp()
+    now_ts = utcnow().timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
     bucket.append(now_ts); FLOOD[key] = bucket
     if len(bucket) > s.flood_limit and s.flood_mode == "mute":
         try:
-            until = datetime.now(timezone.utc) + timedelta(minutes=5)
+            until = utcnow() + timedelta(minutes=5)
             await context.bot.restrict_chat_member(
                 chat_id, msg.from_user.id,
                 ChatPermissions(can_send_messages=False),
@@ -366,7 +361,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("owner notify fail:", e)
 
-# ===== Startup hook =====
+# ===== Startup hook ======
 async def on_startup(app: Application):
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
@@ -397,7 +392,6 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
-    # Nếu deploy ở Render Web Service, keep_alive() sẽ mở cổng $PORT
     try:
         keep_alive()
     except Exception as e:
@@ -414,7 +408,10 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("lang", lang_cmd))
 
-    # Filters & toggles (FREE, admin-only)
+    # Whitelist (FREE chỉ wl_add; wl_del/wl_list nằm trong PRO)
+    app.add_handler(CommandHandler("wl_add", wl_add))
+
+    # Filters & toggles (FREE)
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
@@ -431,20 +428,20 @@ def main():
 
     app.add_handler(CommandHandler("warn", warn_cmd))
 
-    # PRO (giữ nguyên trong module pro.*)
+    # PRO modules (trial, redeem, wl_del, wl_list, ad_*)
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
     # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
 
-    # Guard tin nhắn
+    # Guard
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
-# ====== FILTERS & TOGGLES (FREE, admin-only) ======
+# ====== FILTERS & TOGGLES (FREE) ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin(update, context):
         return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
@@ -560,6 +557,32 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s.flood_limit = n
         db.commit()
         await update.message.reply_text(f"✅ Flood limit = {n}")
+    finally:
+        db.close()
+
+# ====== WHITELIST (FREE chỉ /wl_add; còn lại trong PRO) ======
+async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /wl_add <domain>", parse_mode=ParseMode.HTML)
+
+    domain = context.args[0].strip().lower()
+    # Nếu người dùng dán URL => lấy host
+    domain = re.sub(r"^https?://", "", domain)
+    domain = domain.split("/")[0]
+
+    if not re.search(r"[a-z0-9-]+\.[a-z]{2,}", domain):
+        return await update.message.reply_text("Domain không hợp lệ.")
+
+    db = SessionLocal()
+    try:
+        ex = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
+        if ex:
+            return await update.message.reply_text("wl_exists")
+        db.add(Whitelist(chat_id=update.effective_chat.id, domain=domain))
+        db.commit()
+        await update.message.reply_text("wl_added")
     finally:
         db.close()
 
