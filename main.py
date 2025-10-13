@@ -4,7 +4,7 @@ sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import func
+from sqlalchemy import func  # vẫn giữ nếu nơi khác còn dùng
 
 from telegram import (
     Update, ChatPermissions,
@@ -44,6 +44,15 @@ LINK_RE = re.compile(
 def remove_links(text: str) -> str:
     """Thay mọi link bằng [link bị xóa] nhưng giữ lại chữ mô tả."""
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
+
+# ====== TZ-SAFE HELPERS (fix lỗi naive vs aware) ======
+def utcnow():
+    return datetime.now(timezone.utc)
+
+def to_utc_aware(dt):
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
@@ -130,7 +139,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lang = USER_LANG.get(user.id, "vi")
     hello = t(lang, "start", name=user.first_name, count=total)
-    hint = LANG[lang]["lang_usage"]
 
     msg = (
         "🤖 <b>HotroSecurityBot</b>\n\n"
@@ -234,7 +242,8 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add(w)
     else:
         w.count += 1
-        w.last_warned = func.now()
+        # SỬA: dùng UTC aware thay vì func.now() (naive ở 1 số DB)
+        w.last_warned = utcnow()
     db.commit()
 
     await context.bot.send_message(
@@ -281,6 +290,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
+    # Từ khoá cấm
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern and it.pattern.lower() in text.lower():
             try: await msg.delete()
@@ -288,12 +298,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.close()
             return
 
+    # Chặn forward
     if s.antiforward and getattr(msg, "forward_origin", None):
         try: await msg.delete()
         except Exception: pass
         db.close()
         return
 
+    # Chặn link (trừ whitelist)
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         if not any(d and d.lower() in text.lower() for d in wl):
@@ -302,12 +314,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.close()
             return
 
+    # Chặn mention
     if s.antimention and "@" in text:
         try: await msg.delete()
         except Exception: pass
         db.close()
         return
 
+    # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
     now_ts = datetime.now(timezone.utc).timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
@@ -508,7 +522,7 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
-# ====== END FILTERS & TOGGLES BLOCK ======
 
+# ====== Entrypoint ======
 if __name__ == "__main__":
     main()
