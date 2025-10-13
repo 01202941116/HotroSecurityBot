@@ -4,7 +4,7 @@ from __future__ import annotations
 from core.lang import t  # i18n
 
 import secrets
-from datetime import timedelta, timezone as _tz
+from datetime import datetime, timedelta, timezone as _tz
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -18,7 +18,7 @@ from core.models import (
     Whitelist,
     PromoSetting,
     add_days,
-    now_utc,
+    now_utc,   # vẫn import, nhưng sẽ chuẩn hoá về aware ở dưới
 )
 
 # ====== i18n: lưu lựa chọn ngôn ngữ tạm thời trong RAM (đơn giản) ======
@@ -32,23 +32,32 @@ async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not context.args:
         cur = USER_LANG.get(uid, "vi").upper()
-        return await update.message.reply_text(f"Ngôn ngữ hiện tại / Current language: {cur}\nDùng/Use: /lang vi | /lang en")
+        return await update.message.reply_text(
+            f"Ngôn ngữ hiện tại / Current language: {cur}\nDùng/Use: /lang vi | /lang en"
+        )
     v = context.args[0].lower()
     if v not in ("vi", "en"):
-        return await update.message.reply_text("Ngôn ngữ không hợp lệ. Dùng: /lang vi | /lang en\nInvalid language. Use: /lang vi | /lang en")
+        return await update.message.reply_text(
+            "Ngôn ngữ không hợp lệ. Dùng: /lang vi | /lang en\nInvalid language. Use: /lang vi | /lang en"
+        )
     USER_LANG[uid] = v
     return await update.message.reply_text(f"✅ Đã đổi ngôn ngữ sang / Switched to: {v.upper()}")
 
-# ====== Fix timezone-safe ======
+# ====== Timezone-safe helpers ======
 def ensure_aware(dt):
-    """Trả về datetime có tzinfo=UTC nếu chưa có."""
+    """Trả về datetime có tzinfo=UTC nếu dt đang naive; giữ nguyên nếu đã aware."""
     if dt is None:
         return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz)
+
+def now_aw():
+    """Thời gian hiện tại UTC (timezone-aware)."""
+    # Một số triển khai now_utc() có thể trả về naive -> chuẩn hoá
+    return ensure_aware(now_utc())
 
 def _has_active_pro(db: SessionLocal, user_id: int) -> bool:
     """User còn PRO/TRIAL? (timezone-aware)."""
-    now = now_utc()
+    now = now_aw()
     u = db.query(User).filter_by(id=user_id).one_or_none()
     if u and u.is_pro:
         exp = ensure_aware(u.pro_expires_at)
@@ -118,16 +127,14 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         user = _ensure_user(db, u.id, u.username)
-        now = now_utc()
+        now = now_aw()
 
         # đang PRO còn hạn -> báo lại
         exp = ensure_aware(user.pro_expires_at)
         if user.is_pro and exp and exp > now:
             remain = exp - now
             days = max(0, remain.days)
-            return await update.message.reply_text(
-                t(lang, "trial_active", days=days)
-            )
+            return await update.message.reply_text(t(lang, "trial_active", days=days))
 
         # đã từng trial & kết thúc -> không cho lại
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
@@ -135,12 +142,11 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
                 remain = t_exp - now
-                d, h = remain.days, remain.seconds // 3600
-                return await update.message.reply_text(
-                    t(lang, "trial_active", days=d)
-                )
+                d = remain.days
+                return await update.message.reply_text(t(lang, "trial_active", days=d))
             if not trow.active:
-                return await update.message.reply_text(t(lang, "trial_ended"))
+                # key trong lang.py là "trial_end"
+                return await update.message.reply_text(t(lang, "trial_end"))
 
         # cấp trial 7 ngày
         exp_new = now + timedelta(days=7)
@@ -176,11 +182,13 @@ async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         days = lk.days or 30
         user.is_pro = True
-        user.pro_expires_at = now_utc() + timedelta(days=days)
+        user.pro_expires_at = now_aw() + timedelta(days=days)
         lk.used = True
         lk.issued_to = u.id
         db.commit()
-        await update.message.reply_text(t(lang, "genkey_created").replace("{days}", str(days)))
+        await update.message.reply_text(
+            t(lang, "genkey_created").replace("{days}", str(days))
+        )
     finally:
         db.close()
 
@@ -351,12 +359,11 @@ async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 # ----------- Trạng thái quảng cáo (/ad_status) -----------
-from datetime import timezone as _tz
 def _fmt_ts(dt):
     if not dt:
         return "—"
     try:
-        return dt.astimezone(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return ensure_aware(dt).astimezone(_tz).strftime("%Y-%m-%d %H:%M:%S UTC")
     except Exception:
         return str(dt)
 
