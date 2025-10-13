@@ -4,7 +4,7 @@ from __future__ import annotations
 from core.lang import t  # i18n
 
 import secrets
-from datetime import datetime, timedelta, timezone as _tz
+from datetime import timedelta, timezone as _tz
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -18,7 +18,7 @@ from core.models import (
     Whitelist,
     PromoSetting,
     add_days,
-    now_utc,   # vẫn import, nhưng sẽ chuẩn hoá về aware ở dưới
+    now_utc,
 )
 
 # ====== i18n: lưu lựa chọn ngôn ngữ tạm thời trong RAM (đơn giản) ======
@@ -45,14 +45,14 @@ async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== Timezone-safe helpers ======
 def ensure_aware(dt):
-    """Trả về datetime có tzinfo=UTC nếu dt đang naive; giữ nguyên nếu đã aware."""
+    """Trả về datetime timezone-aware (UTC). Nếu dt naive -> gán tzinfo=UTC."""
     if dt is None:
         return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
 
 def now_aw():
     """Thời gian hiện tại UTC (timezone-aware)."""
-    # Một số triển khai now_utc() có thể trả về naive -> chuẩn hoá
+    # now_utc() có thể trả về naive -> chuẩn hoá
     return ensure_aware(now_utc())
 
 def _has_active_pro(db: SessionLocal, user_id: int) -> bool:
@@ -136,7 +136,7 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             days = max(0, remain.days)
             return await update.message.reply_text(t(lang, "trial_active", days=days))
 
-        # đã từng trial & kết thúc -> không cho lại
+        # đã từng trial & còn hạn -> báo lại; đã hết hạn & đánh dấu inactive -> không cho lại
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
@@ -145,7 +145,6 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 d = remain.days
                 return await update.message.reply_text(t(lang, "trial_active", days=d))
             if not trow.active:
-                # key trong lang.py là "trial_end"
                 return await update.message.reply_text(t(lang, "trial_end"))
 
         # cấp trial 7 ngày
@@ -363,7 +362,7 @@ def _fmt_ts(dt):
     if not dt:
         return "—"
     try:
-        return ensure_aware(dt).astimezone(_tz).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return ensure_aware(dt).astimezone(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     except Exception:
         return str(dt)
 
@@ -375,7 +374,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s = db.query(PromoSetting).filter_by(chat_id=chat_id).one_or_none()
 
         if not s:
-            await update.message.reply_text(t(lang, "wl_empty"))  # tái dùng key ngắn gọn
+            await update.message.reply_text(t(lang, "wl_empty"))
             return
 
         msg = (
