@@ -45,7 +45,7 @@ def remove_links(text: str) -> str:
     """Thay mọi link bằng [link bị xóa] nhưng giữ lại chữ mô tả."""
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
 
-# ====== TZ-SAFE HELPERS (fix lỗi naive vs aware) ======
+# ====== TZ-SAFE HELPERS ======
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -82,7 +82,7 @@ def _fmt_td(td: timedelta) -> str:
     parts.append(f"{s}s")
     return " ".join(parts)
 
-# ====== Helpers ======
+# ====== DB helpers ======
 def get_settings(chat_id: int) -> Setting:
     db = SessionLocal()
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -98,6 +98,21 @@ def get_settings(chat_id: int) -> Setting:
         db.add(s)
         db.commit()
     return s
+
+# ====== ADMIN CHECK ======
+async def _must_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Private chat: luôn cho phép.
+    Group/SuperGroup: chỉ admin/creator mới được dùng lệnh quản trị.
+    """
+    chat = update.effective_chat
+    if chat and chat.type == "private":
+        return True
+    try:
+        m = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+        return m.status in ("administrator", "creator")
+    except Exception:
+        return False
 
 # ====== Chọn ngôn ngữ (lưu tạm theo user) ======
 USER_LANG = {}  # {user_id: "vi"|"en"}
@@ -242,8 +257,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add(w)
     else:
         w.count += 1
-        # SỬA: dùng UTC aware thay vì func.now() (naive ở 1 số DB)
-        w.last_warned = utcnow()
+        w.last_warned = utcnow()  # dùng UTC-aware
     db.commit()
 
     await context.bot.send_message(
@@ -286,13 +300,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.effective_chat.id
     text = (msg.text or msg.caption or "")
+    low = text.lower()
 
     db = SessionLocal()
     s = get_settings(chat_id)
 
     # Từ khoá cấm
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
-        if it.pattern and it.pattern.lower() in text.lower():
+        if it.pattern and it.pattern.lower() in low:
             try: await msg.delete()
             except Exception: pass
             db.close()
@@ -308,7 +323,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Chặn link (trừ whitelist)
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        if not any(d and d.lower() in text.lower() for d in wl):
+        if not any(d and d.lower() in low for d in wl):
             try: await msg.delete()
             except Exception: pass
             db.close()
@@ -382,6 +397,7 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
+    # Nếu deploy ở Render Web Service, keep_alive() sẽ mở cổng $PORT
     try:
         keep_alive()
     except Exception as e:
@@ -398,6 +414,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("lang", lang_cmd))
 
+    # Filters & toggles (FREE, admin-only)
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
     app.add_handler(CommandHandler("filter_del", filter_del))
@@ -413,19 +430,24 @@ def main():
     app.add_handler(CommandHandler("ping", ping_cmd))
 
     app.add_handler(CommandHandler("warn", warn_cmd))
+
+    # PRO (giữ nguyên trong module pro.*)
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
-    # Inline buttons: Languages / chọn ngôn ngữ
+    # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
 
+    # Guard tin nhắn
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
-# ====== FILTERS & TOGGLES ======
+# ====== FILTERS & TOGGLES (FREE, admin-only) ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text(
             "Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode="HTML"
@@ -445,6 +467,8 @@ async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     db = SessionLocal()
     try:
         items = db.query(Filter).filter_by(chat_id=update.effective_chat.id).all()
@@ -456,6 +480,8 @@ async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /filter_del <id>")
     try:
@@ -487,24 +513,38 @@ async def _toggle(update: Update, field: str, val: bool, label: str):
         db.close()
 
 async def antilink_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antilink", True, "Anti-link")
 
 async def antilink_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antilink", False, "Anti-link")
 
 async def antimention_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antimention", True, "Anti-mention")
 
 async def antimention_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antimention", False, "Anti-mention")
 
 async def antiforward_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antiforward", True, "Anti-forward")
 
 async def antiforward_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     await _toggle(update, "antiforward", False, "Anti-forward")
 
 async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin(update, context):
+        return await update.message.reply_text("Chỉ admin mới dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /setflood <số tin>")
     try:
