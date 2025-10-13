@@ -6,12 +6,15 @@ import os, re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 
-from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton  # <<< added
+from telegram import (
+    Update, ChatPermissions,
+    InlineKeyboardMarkup, InlineKeyboardButton
+)
 from telegram.constants import ParseMode
 from telegram.error import Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    ContextTypes, filters, CallbackQueryHandler  # <<< added
+    ContextTypes, filters, CallbackQueryHandler
 )
 
 # ====== LOCAL MODELS ======
@@ -19,6 +22,9 @@ from core.models import (
     init_db, SessionLocal, Setting, Filter, Whitelist,
     User, count_users, Warning, Blacklist
 )
+
+# ====== I18N ======
+from core.lang import t, LANG  # dùng bộ ngôn ngữ
 
 # ====== KEEP ALIVE WEB ======
 from keep_alive_server import keep_alive
@@ -84,28 +90,33 @@ def get_settings(chat_id: int) -> Setting:
         db.commit()
     return s
 
-# ====== Chọn ngôn ngữ (lưu tạm theo user) ======  # <<< added
-USER_LANG = {}  # {user_id: "vi"|"en"}                                  # <<< added
+# ====== Chọn ngôn ngữ (lưu tạm theo user) ======
+USER_LANG = {}  # {user_id: "vi"|"en"}
 
-async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):  # <<< added
-    """Xử lý các nút Languages / chọn ngôn ngữ."""                              # <<< added
-    q = update.callback_query                                                   # <<< added
-    await q.answer()                                                            # <<< added
-    data = q.data or ""                                                         # <<< added
-    if data == "lang_menu":                                                     # <<< added
-        kb = [[                                                                  # <<< added
-            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi"),      # <<< added
-            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),         # <<< added
-        ]]                                                                       # <<< added
-        return await q.edit_message_reply_markup(InlineKeyboardMarkup(kb))       # <<< added
-    if data == "lang_vi":                                                       # <<< added
-        USER_LANG[q.from_user.id] = "vi"                                        # <<< added
-        return await q.edit_message_text("✅ Đã đổi ngôn ngữ sang: 🇻🇳 Tiếng Việt")  # <<< added
-    if data == "lang_en":                                                       # <<< added
-        USER_LANG[q.from_user.id] = "en"                                        # <<< added
-        return await q.edit_message_text("✅ Language switched to: 🇬🇧 English")     # <<< added
+async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý các nút Languages / chọn ngôn ngữ."""
+    q = update.callback_query
+    await q.answer()
+    data = (q.data or "").strip()
 
-# ====== Commands FREE ======
+    if data == "lang_menu":
+        kb = [[
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi"),
+            InlineKeyboardButton("🇬🇧 English",    callback_data="lang_en"),
+        ]]
+        return await q.edit_message_reply_markup(InlineKeyboardMarkup(kb))
+
+    if data == "lang_vi":
+        USER_LANG[q.from_user.id] = "vi"
+        await q.edit_message_reply_markup(reply_markup=None)
+        return await q.message.reply_text(LANG["vi"]["lang_switched"])
+
+    if data == "lang_en":
+        USER_LANG[q.from_user.id] = "en"
+        await q.edit_message_reply_markup(reply_markup=None)
+        return await q.message.reply_text(LANG["en"]["lang_switched"])
+
+# ====== Commands ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db = SessionLocal()
@@ -115,55 +126,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add(u)
         db.commit()
     total = count_users()
+    db.close()
+
+    lang = USER_LANG.get(user.id, "vi")
+    hello = t(lang, "start", name=user.first_name, count=total)
+    hint = LANG[lang]["lang_usage"]
+
     msg = (
         "🤖 <b>HotroSecurityBot</b>\n\n"
-        f"Chào <b>{user.first_name}</b> 👋\n"
-        f"Hiện có <b>{total:,}</b> người đang sử dụng bot.\n\n"
-        "Gõ /help để xem danh sách lệnh 💬"
+        f"{hello}\n\n"
+        f"{'Gõ /help để xem danh sách lệnh 💬' if lang=='vi' else 'Type /help to see all commands 💬'}"
     )
-    # Gửi kèm nút Languages                                                  # <<< added
-    keyboard = [[InlineKeyboardButton("Languages", callback_data="lang_menu")]] # <<< added
-    await context.bot.send_message(                                            # <<< added
-        update.effective_chat.id, msg, parse_mode=ParseMode.HTML,              # <<< added
-        reply_markup=InlineKeyboardMarkup(keyboard)                            # <<< added
+
+    keyboard = [[InlineKeyboardButton("Languages", callback_data="lang_menu")]]
+    await context.bot.send_message(
+        update.effective_chat.id, msg,
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = (
-        "🎯 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
-        "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
-
-        "🆓 <b>GÓI FREE</b>\n"
-        "• /filter_add &lt;từ&gt; – Thêm từ khoá cần chặn\n"
-        "• /filter_list – Xem danh sách từ khoá đã chặn\n"
-        "• /filter_del &lt;id&gt; – Xoá filter theo ID\n"
-        "• /antilink_on | /antilink_off – Bật/tắt chặn link\n"
-        "• /antimention_on | /antimention_off – Bật/tắt chặn tag @all / mention\n"
-        "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
-        "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n\n"
-
-        "💎 <b>GÓI PRO</b>\n"
-        "• /pro – Mở bảng hướng dẫn dùng thử & kích hoạt PRO\n"
-        "• /trial – Dùng thử miễn phí 7 ngày\n"
-        "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
-        "• /genkey &lt;days&gt; – (OWNER) Tạo key PRO thời hạn tuỳ chọn\n"
-        "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist link được phép gửi\n"
-        "• /warn – (Admin) Trả lời vào tin có link để cảnh báo / xoá link / tự động chặn khi vi phạm 3 lần\n\n"
-
-        "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
-        "Tính năng hỗ trợ đăng tin quảng cáo tự động theo chu kỳ thời gian.\n"
-        "• /ad_on – Bật quảng cáo tự động cho nhóm\n"
-        "• /ad_off – Tắt quảng cáo tự động\n"
-        "• /ad_set &lt;nội dung&gt; – Đặt nội dung quảng cáo sẽ được bot gửi\n"
-        "• /ad_interval &lt;phút&gt; – Đặt chu kỳ gửi quảng cáo (mặc định 60 phút)\n\n"
-
-        "⚙️ <b>THÔNG TIN & HỖ TRỢ</b>\n"
-        f"• Liên hệ @{CONTACT_USERNAME or 'Myyduyenng'} để mua key PRO hoặc hỗ trợ kỹ thuật.\n"
-        "• Bot hoạt động 24/7 – phù hợp cho các nhóm Momo, game, trade, chia sẻ link, quảng bá sản phẩm.\n"
-        "• Các tính năng PRO giúp nhóm bạn an toàn, sạch spam và chuyên nghiệp hơn.\n\n"
-
-        "🚀 <i>Cảm ơn bạn đã sử dụng HotroSecurityBot!</i>"
-    )
+    lang = USER_LANG.get(update.effective_user.id, "vi")
+    txt = LANG[lang]["help_full"]
     await context.bot.send_message(
         update.effective_chat.id,
         txt,
@@ -171,6 +155,18 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
+async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Đổi ngôn ngữ bằng lệnh: /lang vi | /lang en"""
+    lang_now = USER_LANG.get(update.effective_user.id, "vi")
+    if not context.args:
+        return await update.message.reply_text(LANG[lang_now]["lang_usage"])
+    code = context.args[0].lower()
+    if code not in ("vi", "en"):
+        return await update.message.reply_text(LANG[lang_now]["lang_usage"])
+    USER_LANG[update.effective_user.id] = code
+    await update.message.reply_text(LANG[code]["lang_switched"])
+
+# ====== STATS / STATUS / UPTIME / PING ======
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = count_users()
     await update.message.reply_text(f"📊 Tổng người dùng bot: {total:,}")
@@ -182,7 +178,6 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     up = datetime.now(timezone.utc) - START_AT
     await m.edit_text(f"✅ Online | 🕒 Uptime: {_fmt_td(up)} | 🏓 Ping: {dt:.0f} ms")
 
-# ====== UPTIME / PING ======
 async def uptime_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     up = datetime.now(timezone.utc) - START_AT
     await update.message.reply_text(f"⏱ Uptime: {_fmt_td(up)}")
@@ -202,7 +197,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg.reply_to_message:
         return await msg.reply_text("Hãy reply vào tin có link rồi gõ /warn")
 
-    # Chỉ admin/creator được dùng
     try:
         member = await context.bot.get_chat_member(chat_id, admin_user.id)
         if member.status not in ("administrator", "creator"):
@@ -214,19 +208,15 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user = target_msg.from_user
     text = (target_msg.text or target_msg.caption or "")
 
-    # Nếu tin không có link -> bỏ qua
     if not LINK_RE.search(text):
         return await msg.reply_text("Tin được reply không chứa link.")
 
     db = SessionLocal()
-
-    # link thuộc whitelist -> không xử lý
     wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
     if any(d and d.lower() in text.lower() for d in wl):
         db.close()
         return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
 
-    # Xóa tin gốc & thông báo bản đã loại link
     try:
         await target_msg.delete()
     except Exception:
@@ -238,7 +228,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    # Cập nhật warning count
     w = db.query(Warning).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
     if not w:
         w = Warning(chat_id=chat_id, user_id=target_user.id, count=1)
@@ -254,7 +243,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
-    # đủ 3 lần -> thêm blacklist + (tuỳ chọn) restrict dài hạn
     if w.count >= 3:
         bl = db.query(Blacklist).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
         if not bl:
@@ -293,34 +281,33 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     s = get_settings(chat_id)
 
-    # Từ khoá cấm
     for it in db.query(Filter).filter_by(chat_id=chat_id).all():
         if it.pattern and it.pattern.lower() in text.lower():
             try: await msg.delete()
             except Exception: pass
+            db.close()
             return
 
-    # Chặn forward
     if s.antiforward and getattr(msg, "forward_origin", None):
         try: await msg.delete()
         except Exception: pass
+        db.close()
         return
 
-    # Chặn link (trừ whitelist) — KHÔNG cảnh báo tự động
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
         if not any(d and d.lower() in text.lower() for d in wl):
             try: await msg.delete()
             except Exception: pass
+            db.close()
             return
 
-    # Chặn mention
     if s.antimention and "@" in text:
         try: await msg.delete()
         except Exception: pass
+        db.close()
         return
 
-    # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
     now_ts = datetime.now(timezone.utc).timestamp()
     bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
@@ -335,6 +322,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
+    db.close()
 
 # ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -351,7 +339,6 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== Startup hook =====
 async def on_startup(app: Application):
-    # Xoá webhook nếu có (tránh Conflict khi chuyển webhook → polling)
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
         print("Webhook cleared, using polling mode.")
@@ -364,7 +351,6 @@ async def on_startup(app: Application):
     except Exception:
         app.bot_data["contact"] = CONTACT_USERNAME or "admin"
 
-    # Thông báo khởi động (tùy chọn)
     if OWNER_ID:
         try:
             await app.bot.send_message(
@@ -382,7 +368,6 @@ def main():
     print("🚀 Booting bot...")
     init_db()
 
-    # giữ Render thức
     try:
         keep_alive()
     except Exception as e:
@@ -392,11 +377,12 @@ def main():
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # ===== ĐĂNG KÝ HANDLERS (các hàm PHẢI được định nghĩa bên trên) =====
+    # ===== ĐĂNG KÝ HANDLERS =====
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("lang", lang_cmd))
 
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
@@ -416,15 +402,15 @@ def main():
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
-    # Handler cho các nút inline (Languages / chọn ngôn ngữ)            # <<< added
-    app.add_handler(CallbackQueryHandler(on_lang_button))                 # <<< added
+    # Inline buttons: Languages / chọn ngôn ngữ
+    app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
 
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
-# ====== FILTERS & TOGGLES (ADD THIS BLOCK) ======
+# ====== FILTERS & TOGGLES ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text(
@@ -523,7 +509,6 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 # ====== END FILTERS & TOGGLES BLOCK ======
-
 
 if __name__ == "__main__":
     main()
