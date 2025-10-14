@@ -603,18 +603,24 @@ async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await m.reply_text("Cú pháp: /wl_add <domain>", parse_mode=ParseMode.HTML)
 
-    domain = to_host(context.args[0])
+    raw = context.args[0]
+    domain = to_host(raw)
     if not domain:
         return await m.reply_text("Domain không hợp lệ.")
 
     db = SessionLocal()
     try:
-        ex = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
+        chat_id = update.effective_chat.id
+        ex = db.query(Whitelist).filter_by(chat_id=chat_id, domain=domain).one_or_none()
         if ex:
-            return await m.reply_text("wl_exists")
-        db.add(Whitelist(chat_id=update.effective_chat.id, domain=domain))
+            return await m.reply_text(f"wl_exists\n• chat_id={chat_id}\n• domain={domain}")
+        db.add(Whitelist(chat_id=chat_id, domain=domain))
         db.commit()
-        await m.reply_text("wl_added")
+
+        total = db.query(Whitelist).filter_by(chat_id=chat_id).count()
+        await m.reply_text(
+            f"wl_added\n• chat_id={chat_id}\n• saved={domain}\n• total_in_this_chat={total}"
+        )
     finally:
         db.close()
 
