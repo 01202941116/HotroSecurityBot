@@ -59,29 +59,23 @@ URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
 
 def extract_hosts(text: str) -> list[str]:
-    """Lấy tất cả host xuất hiện trong text (URL & domain trần)."""
     text = text or ""
     hosts = []
-    # URL đầy đủ
     for m in URL_RE.findall(text):
         hosts.append(to_host(m))
-    # Domain trần (vd: example.com)
     for m in DOMAIN_RE.findall(text):
         hosts.append(to_host(m))
-    # loại rỗng & trùng
-    out = []
-    seen = set()
+    out, seen = [], set()
     for h in hosts:
         if h and h not in seen:
             out.append(h); seen.add(h)
     return out
 
 def host_allowed(host: str, allow_list: list[str]) -> bool:
-    """host được phép nếu trùng hẳn hoặc là subdomain của domain whitelist."""
     host = to_host(host)
     for d in allow_list:
         d = to_host(d)
-        if not d: 
+        if not d:
             continue
         if host == d or host.endswith("." + d):
             return True
@@ -260,18 +254,19 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_msg = msg.reply_to_message
     target_user = target_msg.from_user
     text = (target_msg.text or target_msg.caption or "")
-    low_text = text.lower()
 
     if not LINK_RE.search(text):
         return await msg.reply_text("Tin được reply không chứa link.")
 
     db = SessionLocal()
 
+    # ---- KIỂM TRA WHITELIST (đảm bảo các dòng này NẰM TRONG HÀM) ----
     wl_hosts = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-msg_hosts = extract_hosts(text)
-if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-    db.close()
-    return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
+    msg_hosts = extract_hosts(text)
+    if any(host_allowed(h, wl_hosts) for h in msg_hosts):
+        db.close()
+        return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
+    # -----------------------------------------------------------------
 
     try:
         await target_msg.delete()
@@ -353,19 +348,19 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
         return
 
-     # --- Chặn link (trừ whitelist) ---
+    # --- Chặn link (trừ whitelist) ---
     if s.antilink and LINK_RE.search(text):
         wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        hosts = extract_hosts(text)  # gom mọi host xuất hiện
+        hosts = extract_hosts(text)
         if not any(host_allowed(h, wl) for h in hosts):
             try: await msg.delete()
             except Exception: pass
             db.close()
             return
 
-    # --- Chặn mention (bỏ qua @ nằm trong URL) ---
+    # --- Chặn mention (bỏ qua @ nằm trong URL)---
     if s.antimention:
-        text_no_urls = URL_RE.sub("", text)  # xoá tạm URL để không dính @ trong URL/query
+        text_no_urls = URL_RE.sub("", text)
         if "@" in text_no_urls:
             try: await msg.delete()
             except Exception: pass
