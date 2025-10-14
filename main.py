@@ -58,6 +58,38 @@ def to_host(domain_or_url: str) -> str:
     if s.startswith("www."):
         s = s[4:]
     return s
+# --- helpers cho whitelist/link ---
+URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
+
+def extract_hosts(text: str) -> list[str]:
+    """Lấy tất cả host xuất hiện trong text (URL & domain trần)."""
+    text = text or ""
+    hosts = []
+    # URL đầy đủ
+    for m in URL_RE.findall(text):
+        hosts.append(to_host(m))
+    # Domain trần (vd: example.com)
+    for m in DOMAIN_RE.findall(text):
+        hosts.append(to_host(m))
+    # loại rỗng & trùng
+    out = []
+    seen = set()
+    for h in hosts:
+        if h and h not in seen:
+            out.append(h); seen.add(h)
+    return out
+
+def host_allowed(host: str, allow_list: list[str]) -> bool:
+    """host được phép nếu trùng hẳn hoặc là subdomain của domain whitelist."""
+    host = to_host(host)
+    for d in allow_list:
+        d = to_host(d)
+        if not d: 
+            continue
+        if host == d or host.endswith("." + d):
+            return True
+    return False
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
