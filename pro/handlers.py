@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.lang import t  # i18n
+from core.models import SessionLocal, SupportSetting, Supporter, list_supporters, get_support_enabled
 
 import secrets
 from datetime import timedelta, timezone as _tz
@@ -373,3 +374,117 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
     app.add_handler(CommandHandler("ad_status", ad_status))
+    # ---------- SUPPORT MODE (per-group) ----------
+async def _admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    try:
+        m = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        return m.status in ("administrator", "creator")
+    except Exception:
+        return False
+
+async def support_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này.")
+    db = SessionLocal()
+    try:
+        s = db.query(SupportSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = SupportSetting(chat_id=update.effective_chat.id, is_enabled=True)
+            db.add(s)
+        else:
+            s.is_enabled = True
+        db.commit()
+        await m.reply_text("support_on ✅ (người trong danh sách hỗ trợ được gửi link)")
+    finally:
+        db.close()
+
+async def support_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này.")
+    db = SessionLocal()
+    try:
+        s = db.query(SupportSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = SupportSetting(chat_id=update.effective_chat.id, is_enabled=False)
+            db.add(s)
+        else:
+            s.is_enabled = False
+        db.commit()
+        await m.reply_text("support_off ❎ (mọi link kiểm tra như thường)")
+    finally:
+        db.close()
+
+async def support_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này.")
+    if not context.args:
+        return await m.reply_text("Dùng: /support_add @username | reply 1 người rồi /support_add")
+
+    # lấy user target từ reply hoặc @username
+    target_id = None
+    if update.message and update.message.reply_to_message:
+        target_id = update.message.reply_to_message.from_user.id
+    if not target_id and context.args:
+        username = context.args[0].lstrip("@")
+        try:
+            user = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        except Exception:
+            user = None
+        # ưu tiên parse nhanh từ entities nếu có
+        for ent in (update.message.entities or []):
+            if ent.type == "mention":
+                pass
+        # nếu không có reply, yêu cầu reply để chắc chắn ID
+        if not target_id:
+            return await m.reply_text("Vui lòng reply vào người cần thêm rồi gõ /support_add")
+
+    db = SessionLocal()
+    try:
+        if not get_support_enabled(db, update.effective_chat.id):
+            return await m.reply_text("Hãy bật trước bằng /support_on")
+        ex = db.query(Supporter).filter_by(chat_id=update.effective_chat.id, user_id=target_id).one_or_none()
+        if ex:
+            return await m.reply_text("Người này đã trong danh sách hỗ trợ.")
+        db.add(Supporter(chat_id=update.effective_chat.id, user_id=target_id))
+        db.commit()
+        await m.reply_text(f"Đã thêm người hỗ trợ: <a href='tg://user?id={target_id}'>user</a>", parse_mode=ParseMode.HTML)
+    finally:
+        db.close()
+
+async def support_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này.")
+    if update.message and update.message.reply_to_message:
+        target_id = update.message.reply_to_message.from_user.id
+    else:
+        return await m.reply_text("Vui lòng reply vào người cần xoá rồi gõ /support_del")
+
+    db = SessionLocal()
+    try:
+        it = db.query(Supporter).filter_by(chat_id=update.effective_chat.id, user_id=target_id).one_or_none()
+        if not it:
+            return await m.reply_text("Không tìm thấy trong danh sách hỗ trợ.")
+        db.delete(it)
+        db.commit()
+        await m.reply_text("Đã xoá khỏi danh sách hỗ trợ.")
+    finally:
+        db.close()
+
+async def support_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    db = SessionLocal()
+    try:
+        uids = list_supporters(db, update.effective_chat.id)
+        if not get_support_enabled(db, update.effective_chat.id):
+            return await m.reply_text("Support mode: ❎\nDanh sách trống.")
+        if not uids:
+            return await m.reply_text("Support mode: ✅\nChưa có người hỗ trợ.")
+        out = ["Support mode: ✅", "• " + "\n• ".join([f"<a href='tg://user?id={x}'>user {x}</a>" for x in uids])]
+        await m.reply_text("\n".join(out), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    finally:
+        db.close()
+
