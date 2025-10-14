@@ -271,10 +271,11 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
 
-    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-    if any(d and d in low_text for d in wl_hosts):
-        db.close()
-        return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
+    wl_hosts = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+msg_hosts = extract_hosts(text)
+if any(host_allowed(h, wl_hosts) for h in msg_hosts):
+    db.close()
+    return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
 
     try:
         await target_msg.delete()
