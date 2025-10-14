@@ -1,4 +1,3 @@
-# pro/handlers.py
 from __future__ import annotations
 
 from core.lang import t  # i18n
@@ -17,64 +16,38 @@ from core.models import (
     Trial,
     Whitelist,
     PromoSetting,
-    add_days,
     now_utc,
 )
 
-# ====== i18n: lưu lựa chọn ngôn ngữ tạm thời trong RAM (đơn giản) ======
+# ====== i18n: lưu lựa chọn ngôn ngữ RAM ======
 USER_LANG: dict[int, str] = {}  # user_id -> "vi" | "en"
 
 def _lang(update: Update) -> str:
     uid = update.effective_user.id if update.effective_user else 0
     return USER_LANG.get(uid, "vi")
 
-# ---------- Safe reply helper ----------
-async def _reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kw):
-    """
-    Gửi reply an toàn cho mọi loại update:
-    - ưu tiên reply vào effective_message nếu có
-    - nếu không có, gửi thẳng vào effective_chat
-    """
-    m = update.effective_message
-    if m:
-        return await m.reply_text(text, **kw)
-    chat = update.effective_chat
-    if chat:
-        return await context.bot.send_message(chat.id, text, **kw)
-    # không có nơi để gửi -> bỏ qua
-    return None
-
 async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     uid = update.effective_user.id
     if not context.args:
         cur = USER_LANG.get(uid, "vi").upper()
-        return await _reply(
-            update, context,
-            f"Ngôn ngữ hiện tại / Current language: {cur}\nDùng/Use: /lang vi | /lang en"
-        )
+        return await m.reply_text(f"Ngôn ngữ hiện tại / Current language: {cur}\nDùng/Use: /lang vi | /lang en")
     v = context.args[0].lower()
     if v not in ("vi", "en"):
-        return await _reply(
-            update, context,
-            "Ngôn ngữ không hợp lệ. Dùng: /lang vi | /lang en\nInvalid language. Use: /lang vi | /lang en"
-        )
+        return await m.reply_text("Ngôn ngữ không hợp lệ. Dùng: /lang vi | /lang en\nInvalid language. Use: /lang vi | /lang en")
     USER_LANG[uid] = v
-    return await _reply(update, context, f"✅ Đã đổi ngôn ngữ sang / Switched to: {v.upper()}")
+    return await m.reply_text(f"✅ Đã đổi ngôn ngữ sang / Switched to: {v.upper()}")
 
-# ====== Timezone-safe helpers ======
+# ====== Timezone-safe ======
 def ensure_aware(dt):
-    """Trả về datetime timezone-aware (UTC). Nếu dt naive -> gán tzinfo=UTC."""
     if dt is None:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
 
 def now_aw():
-    """Thời gian hiện tại UTC (timezone-aware)."""
-    # now_utc() có thể trả về naive -> chuẩn hoá
     return ensure_aware(now_utc())
 
 def _has_active_pro(db: SessionLocal, user_id: int) -> bool:
-    """User còn PRO/TRIAL? (timezone-aware)."""
     now = now_aw()
     u = db.query(User).filter_by(id=user_id).one_or_none()
     if u and u.is_pro:
@@ -93,7 +66,7 @@ HELP_PRO_VI = (
     "• Dùng thử 7 ngày: /trial\n"
     "• Nhập key: /redeem &lt;key&gt;\n"
     "• Tạo key (OWNER): /genkey &lt;days&gt;\n"
-    "• Whitelist: /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list\n"
+    "• Whitelist: /wl_del &lt;domain&gt; | /wl_list (Lưu ý: /wl_add có trong gói FREE)\n"
     "• Quảng cáo tự động nhóm: /ad_on, /ad_off, /ad_set &lt;text&gt;, /ad_interval &lt;phút&gt;\n"
     "• Đổi ngôn ngữ: /lang vi hoặc /lang en\n"
 )
@@ -103,16 +76,17 @@ HELP_PRO_EN = (
     "• 7-day trial: /trial\n"
     "• Redeem key: /redeem &lt;key&gt;\n"
     "• Generate key (OWNER): /genkey &lt;days&gt;\n"
-    "• Whitelist: /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list\n"
+    "• Whitelist: /wl_del &lt;domain&gt; | /wl_list (Note: /wl_add is FREE)\n"
     "• Auto-promotion: /ad_on, /ad_off, /ad_set &lt;text&gt;, /ad_interval &lt;minutes&gt;\n"
     "• Change language: /lang vi or /lang en\n"
 )
 
 # ------------------------ Helpers ------------------------
 async def pro_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     txt = HELP_PRO_EN if lang == "en" else HELP_PRO_VI
-    await _reply(update, context, txt, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    await m.reply_text(txt, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 def _is_owner(owner_id: int | None, user_id: int) -> bool:
     try:
@@ -121,7 +95,6 @@ def _is_owner(owner_id: int | None, user_id: int) -> bool:
         return False
 
 async def _admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Kiểm tra admin nhóm."""
     try:
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
@@ -140,6 +113,7 @@ def _ensure_user(db: SessionLocal, user_id: int, username: str | None) -> User:
 
 # ------------------------ PRO core ------------------------
 async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     u = update.effective_user
     db = SessionLocal()
@@ -147,25 +121,21 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = _ensure_user(db, u.id, u.username)
         now = now_aw()
 
-        # đang PRO còn hạn -> báo lại
         exp = ensure_aware(user.pro_expires_at)
         if user.is_pro and exp and exp > now:
             remain = exp - now
             days = max(0, remain.days)
-            return await _reply(update, context, t(lang, "trial_active", days=days))
+            return await m.reply_text(t(lang, "trial_active", days=days))
 
-        # đã từng trial...
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
-                remain = t_exp - now
-                d = remain.days
-                return await _reply(update, context, t(lang, "trial_active", days=d))
+                d = (t_exp - now).days
+                return await m.reply_text(t(lang, "trial_active", days=d))
             if not trow.active:
-                return await _reply(update, context, t(lang, "trial_end"))
+                return await m.reply_text(t(lang, "trial_end"))
 
-        # cấp trial 7 ngày
         exp_new = now + timedelta(days=7)
         if not trow:
             trow = Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True)
@@ -178,21 +148,22 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.is_pro = True
         user.pro_expires_at = exp_new
         db.commit()
-        await _reply(update, context, t(lang, "trial_started"))
+        await m.reply_text(t(lang, "trial_started"))
     finally:
         db.close()
 
 async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not context.args:
-        return await _reply(update, context, t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
+        return await m.reply_text(t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
 
     key = context.args[0].strip()
     db = SessionLocal()
     try:
         lk = db.query(LicenseKey).filter_by(key=key).one_or_none()
         if not lk or lk.used:
-            return await _reply(update, context, t(lang, "redeem_invalid"))
+            return await m.reply_text(t(lang, "redeem_invalid"))
 
         u = update.effective_user
         user = _ensure_user(db, u.id, u.username)
@@ -203,20 +174,21 @@ async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lk.used = True
         lk.issued_to = u.id
         db.commit()
-        await _reply(update, context, t(lang, "genkey_created").replace("{days}", str(days)))
+        await m.reply_text(t(lang, "genkey_created").replace("{days}", str(days)))
     finally:
         db.close()
 
 async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_id: int = 0):
+    m = update.effective_message
     lang = _lang(update)
     if not _is_owner(owner_id, update.effective_user.id):
-        return await _reply(update, context, t(lang, "genkey_denied"))
+        return await m.reply_text(t(lang, "genkey_denied"))
     days = 30
     if context.args:
         try:
             days = max(1, int(context.args[0]))
         except Exception:
-            return await _reply(update, context, t(lang, "genkey_usage"), parse_mode=ParseMode.HTML)
+            return await m.reply_text(t(lang, "genkey_usage"), parse_mode=ParseMode.HTML)
 
     code = "PRO-" + secrets.token_urlsafe(12).upper()
     db = SessionLocal()
@@ -224,8 +196,7 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
         lk = LicenseKey(key=code, days=days)
         db.add(lk)
         db.commit()
-        await _reply(
-            update, context,
+        await m.reply_text(
             t(lang, "genkey_created").replace("{days}", str(days)).replace("{code}", f"<code>{code}</code>"),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
@@ -233,148 +204,138 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
     finally:
         db.close()
 
-# ------------------------ Whitelist ------------------------
-async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = _lang(update)
-    if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
-    if not context.args:
-        return await _reply(update, context, "Cú pháp / Usage: /wl_add domain.com", parse_mode=ParseMode.HTML)
-    domain = context.args[0].lower()
-
-    db = SessionLocal()
-    try:
-        ex = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
-        if ex:
-            return await _reply(update, context, t(lang, "wl_exists"))
-        db.add(Whitelist(chat_id=update.effective_chat.id, domain=domain))
-        db.commit()
-        await _reply(update, context, t(lang, "wl_added").replace("{domain}", domain))
-    finally:
-        db.close()
-
+# ------------------------ Whitelist (PRO: wl_del, wl_list) ------------------------
 async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     if not context.args:
-        return await _reply(update, context, "Cú pháp / Usage: /wl_del domain.com", parse_mode=ParseMode.HTML)
-    domain = context.args[0].lower()
+        return await m.reply_text("Cú pháp / Usage: /wl_del domain.com", parse_mode=ParseMode.HTML)
+    domain = (context.args[0] or "").lower().strip().strip("/")
 
     db = SessionLocal()
     try:
         it = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
         if not it:
-            return await _reply(update, context, t(lang, "wl_not_found"))
+            return await m.reply_text(t(lang, "wl_not_found"))
         db.delete(it)
         db.commit()
-        await _reply(update, context, t(lang, "wl_deleted").replace("{domain}", domain))
+        await m.reply_text(t(lang, "wl_deleted").replace("{domain}", domain))
     finally:
         db.close()
 
 async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     db = SessionLocal()
     try:
         items = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id).all()
         if not items:
-            return await _reply(update, context, t(lang, "wl_empty"))
+            return await m.reply_text(t(lang, "wl_empty"))
         out = "\n".join(f"• {i.domain}" for i in items)
-        await _reply(update, context, out, disable_web_page_preview=True)
+        await m.reply_text(out, disable_web_page_preview=True)
     finally:
         db.close()
 
 # ------------------------ Quảng cáo tự động ------------------------
 async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     db = SessionLocal()
     try:
         if not _has_active_pro(db, update.effective_user.id):
-            return await _reply(update, context, t(lang, "need_pro"))
+            return await m.reply_text(t(lang, "need_pro"))
 
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True)
+            from core.models import PromoSetting as PS
+            s = PS(chat_id=update.effective_chat.id, is_enabled=True)
             db.add(s)
         else:
             s.is_enabled = True
         db.commit()
-        await _reply(update, context, t(lang, "pro_on"))
+        await m.reply_text(t(lang, "pro_on"))
     finally:
         db.close()
 
 async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     db = SessionLocal()
     try:
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=False)
+            from core.models import PromoSetting as PS
+            s = PS(chat_id=update.effective_chat.id, is_enabled=False)
             db.add(s)
         else:
             s.is_enabled = False
         db.commit()
-        await _reply(update, context, t(lang, "pro_off"))
+        await m.reply_text(t(lang, "pro_off"))
     finally:
         db.close()
 
 async def ad_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     text = " ".join(context.args).strip()
     if not text:
-        return await _reply(update, context, "Cú pháp / Usage: /ad_set <nội dung | content>", parse_mode=ParseMode.HTML)
+        return await m.reply_text("Cú pháp / Usage: /ad_set <nội dung | content>", parse_mode=ParseMode.HTML)
 
     db = SessionLocal()
     try:
         if not _has_active_pro(db, update.effective_user.id):
-            return await _reply(update, context, t(lang, "need_pro"))
+            return await m.reply_text(t(lang, "need_pro"))
 
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True, content=text)
+            from core.models import PromoSetting as PS
+            s = PS(chat_id=update.effective_chat.id, is_enabled=True, content=text)
             db.add(s)
         else:
             s.content = text
         db.commit()
-        await _reply(update, context, t(lang, "ad_updated"))
+        await m.reply_text(t(lang, "ad_updated"))
     finally:
         db.close()
 
 async def ad_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     if not await _admin_only(update, context):
-        return await _reply(update, context, "Chỉ admin mới dùng lệnh này. / Admin only.")
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     if not context.args:
-        return await _reply(update, context, "Cú pháp / Usage: /ad_interval <phút/minutes>", parse_mode=ParseMode.HTML)
+        return await m.reply_text("Cú pháp / Usage: /ad_interval <phút/minutes>", parse_mode=ParseMode.HTML)
     try:
         minutes = max(10, int(context.args[0]))
     except Exception:
-        return await _reply(update, context, "Giá trị không hợp lệ / Invalid value.")
+        return await m.reply_text("Giá trị không hợp lệ / Invalid value.")
 
     db = SessionLocal()
     try:
         if not _has_active_pro(db, update.effective_user.id):
-            return await _reply(update, context, t(lang, "need_pro"))
+            return await m.reply_text(t(lang, "need_pro"))
 
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
-            s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=True, interval_minutes=minutes)
+            from core.models import PromoSetting as PS
+            s = PS(chat_id=update.effective_chat.id, is_enabled=True, interval_minutes=minutes)
             db.add(s)
         else:
             s.interval_minutes = minutes
         s.last_sent_at = None
         db.commit()
-        await _reply(update, context, t(lang, "ad_interval_set").replace("{minutes}", str(minutes)))
+        await m.reply_text(t(lang, "ad_interval_set").replace("{minutes}", str(minutes)))
     finally:
         db.close()
 
-# ----------- Trạng thái quảng cáo (/ad_status) -----------
 def _fmt_ts(dt):
     if not dt:
         return "—"
@@ -384,6 +345,7 @@ def _fmt_ts(dt):
         return str(dt)
 
 async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     lang = _lang(update)
     db = SessionLocal()
     try:
@@ -391,7 +353,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s = db.query(PromoSetting).filter_by(chat_id=chat_id).one_or_none()
 
         if not s:
-            await _reply(update, context, t(lang, "wl_empty"))
+            await m.reply_text(t(lang, "wl_empty"))
             return
 
         msg = (
@@ -401,7 +363,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• {t(lang,'ad_status_content')}: {('OK' if (s.content or '').strip() else '—')}\n"
             f"• {t(lang,'ad_status_last')}: {_fmt_ts(s.last_sent_at)}"
         )
-        await _reply(update, context, msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        await m.reply_text(msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     finally:
         db.close()
 
@@ -414,8 +376,7 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("redeem", redeem_cmd))
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
 
-    # ❗ FREE xử lý /wl_add trong main.py. Ở PRO chỉ đăng ký del/list để tránh trùng lệnh.
-    # app.add_handler(CommandHandler("wl_add", wl_add))
+    # IMPORTANT: NO /wl_add here to avoid double handling with FREE
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
 
