@@ -178,3 +178,26 @@ def count_users(session=None) -> int:
     finally:
         if session is None:
             s.close()
+# --- Support mode (per-group) ---
+from sqlalchemy import Boolean, Column, Integer, BigInteger, String, UniqueConstraint
+
+class SupportSetting(Base):
+    __tablename__ = "support_settings"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, index=True, nullable=False, unique=True)
+    is_enabled = Column(Boolean, default=False)
+
+class Supporter(Base):
+    __tablename__ = "supporters"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, index=True, nullable=False)
+    user_id = Column(BigInteger, index=True, nullable=False)
+    note = Column(String(120), default="")  # optional
+    __table_args__ = (UniqueConstraint('chat_id', 'user_id', name='uix_supporter_chat_user'),)
+
+def get_support_enabled(db: SessionLocal, chat_id: int) -> bool:
+    s = db.query(SupportSetting).filter_by(chat_id=chat_id).one_or_none()
+    return bool(s and s.is_enabled)
+
+def list_supporters(db: SessionLocal, chat_id: int) -> list[int]:
+    return [r.user_id for r in db.query(Supporter).filter_by(chat_id=chat_id).all()]
