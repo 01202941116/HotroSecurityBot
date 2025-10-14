@@ -21,6 +21,11 @@ from core.models import (
     init_db, SessionLocal, Setting, Filter, Whitelist,
     User, count_users, Warning, Blacklist
 )
+from core.models import (
+    init_db, SessionLocal, Setting, Filter, Whitelist,
+    User, count_users, Warning, Blacklist,
+    Supporter, SupportSetting, list_supporters, get_support_enabled   # <-- thêm
+)
 
 # ====== I18N ======
 from core.lang import t, LANG  # dùng bộ ngôn ngữ
@@ -351,11 +356,22 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
         return
 
-    # --- Chặn link (trừ whitelist) ---
+       # Chặn link (trừ whitelist + supporter)
     if s.antilink and LINK_RE.search(text):
-        wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        hosts = extract_hosts(text)
-        if not any(host_allowed(h, wl) for h in hosts):
+        # 1) whitelist domain
+        wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+        is_whitelisted = any(d and d in low for d in wl)
+
+        # 2) supporter (nếu support mode bật)
+        allow_support = False
+        try:
+            if get_support_enabled(db, chat_id):
+                sup_ids = list_supporters(db, chat_id)
+                allow_support = msg.from_user.id in sup_ids
+        except Exception:
+            allow_support = False
+
+        if not is_whitelisted and not allow_support:
             try: await msg.delete()
             except Exception: pass
             db.close()
