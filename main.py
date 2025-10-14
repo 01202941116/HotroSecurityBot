@@ -358,9 +358,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
        # Chặn link (trừ whitelist + supporter)
     if s.antilink and LINK_RE.search(text):
-        # 1) whitelist domain
-        wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        is_whitelisted = any(d and d in low for d in wl)
+    is_whitelisted = any(d and d in low for d in wl)
+    allow_support = msg.from_user.id in sup_ids if get_support_enabled(db, chat_id) else False
+
+    if not is_whitelisted and not allow_support:
+        await msg.delete()
+        await context.bot.send_message(chat_id, f"⚠️ Link của <a href='tg://user?id={msg.from_user.id}'>bạn</a> đang chờ kiểm duyệt.", parse_mode="HTML")
+        return
 
         # 2) supporter (nếu support mode bật)
         allow_support = False
