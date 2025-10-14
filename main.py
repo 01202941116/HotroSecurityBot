@@ -9,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from telegram.constants import ParseMode
+    # Conflict dùng cho on_error
 from telegram.error import Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -54,14 +55,13 @@ def to_host(domain_or_url: str) -> str:
         return ""
     s = re.sub(r"^https?://", "", s)
     s = s.split("/")[0].split("?")[0].strip()
-    # bỏ www. nếu có (tuỳ nhóm thích để cũng OK, để khớp rộng hơn thì bỏ)
     if s.startswith("www."):
         s = s[4:]
     return s
 
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
-    from pro.handlers import register_handlers  # (PRO: NO /wl_add here)
+    from pro.handlers import register_handlers  # (PRO: không đăng ký wl_add tại đây)
 except Exception as e:
     print("pro.handlers warn:", e)
     register_handlers = lambda app, **kw: None
@@ -232,14 +232,15 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_msg = msg.reply_to_message
     target_user = target_msg.from_user
     text = (target_msg.text or target_msg.caption or "")
+    low_text = text.lower()
 
     if not LINK_RE.search(text):
         return await msg.reply_text("Tin được reply không chứa link.")
 
     db = SessionLocal()
 
-    wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-    if any(d and d in text.lower() for d in [to_host(x) for x in wl]):
+    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+    if any(d and d in low_text for d in wl_hosts):
         db.close()
         return await msg.reply_text("Domain này nằm trong whitelist, không cảnh báo.")
 
@@ -436,7 +437,7 @@ def main():
 
     app.add_handler(CommandHandler("warn", warn_cmd))
 
-    # PRO: (wl_del, wl_list, pro features)
+    # PRO (trial/redeem/genkey/ad_*, wl_del, wl_list…)
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
