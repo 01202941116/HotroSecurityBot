@@ -357,21 +357,24 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
         return
 
-    # Chặn link (trừ whitelist)
+     # --- Chặn link (trừ whitelist) ---
     if s.antilink and LINK_RE.search(text):
-        wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        if not any(d and d in low for d in wl):
+        wl = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+        hosts = extract_hosts(text)  # gom mọi host xuất hiện
+        if not any(host_allowed(h, wl) for h in hosts):
             try: await msg.delete()
             except Exception: pass
             db.close()
             return
 
-    # Chặn mention
-    if s.antimention and "@" in text:
-        try: await msg.delete()
-        except Exception: pass
-        db.close()
-        return
+    # --- Chặn mention (bỏ qua @ nằm trong URL) ---
+    if s.antimention:
+        text_no_urls = URL_RE.sub("", text)  # xoá tạm URL để không dính @ trong URL/query
+        if "@" in text_no_urls:
+            try: await msg.delete()
+            except Exception: pass
+            db.close()
+            return
 
     # Kiểm soát flood
     key = (chat_id, msg.from_user.id)
