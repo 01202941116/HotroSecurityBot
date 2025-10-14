@@ -261,7 +261,6 @@ async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== Register ======
 def register_handlers(app: Application, owner_id: int | None = None):
-    app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("pro", pro_cmd))
     app.add_handler(CommandHandler("trial", trial_cmd))
     app.add_handler(CommandHandler("redeem", redeem_cmd))
