@@ -38,7 +38,7 @@ def add_days(d: int):
 # ===== ENTITIES =====
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)           # telegram user id
+    id = Column(BigInteger, primary_key=True)           # ✅ Telegram user id 64-bit
     username = Column(String, nullable=True)
     is_pro = Column(Boolean, default=False)
     pro_expires_at = Column(DateTime, nullable=True)
@@ -49,14 +49,14 @@ class LicenseKey(Base):
     key = Column(String, unique=True, index=True)
     tier = Column(String, default="pro")
     days = Column(Integer, default=30)
-    issued_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    issued_to = Column(BigInteger, ForeignKey("users.id"), nullable=True)  # ✅ 64-bit
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now_utc)
 
 class Trial(Base):
     __tablename__ = "trials"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, unique=True)
+    user_id = Column(BigInteger, unique=True)  # ✅ 64-bit
     started_at = Column(DateTime, default=now_utc)
     expires_at = Column(DateTime)
     active = Column(Boolean, default=True)
@@ -64,13 +64,13 @@ class Trial(Base):
 class Filter(Base):
     __tablename__ = "filters"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
+    chat_id = Column(BigInteger, index=True)  # ✅ 64-bit
     pattern = Column(String, index=True)
 
 class Setting(Base):
     __tablename__ = "settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True)
+    chat_id = Column(BigInteger, unique=True, index=True)  # ✅ 64-bit
     antilink = Column(Boolean, default=True)
     antimention = Column(Boolean, default=True)
     antiforward = Column(Boolean, default=True)
@@ -80,23 +80,22 @@ class Setting(Base):
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
+    chat_id = Column(BigInteger, index=True)  # ✅ 64-bit
     domain = Column(String, index=True)
 
 class Captcha(Base):
     __tablename__ = "captcha"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
-    user_id = Column(BigInteger, index=True)
+    chat_id = Column(BigInteger, index=True)  # ✅ 64-bit
+    user_id = Column(BigInteger, index=True)  # ✅ 64-bit
     answer = Column(String)
     created_at = Column(DateTime, default=now_utc)
 
 # ==== Auto Promo (đồng bộ với main.py/scheduler.py) ====
 class PromoSetting(Base):
     __tablename__ = "promo_settings"
-
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
+    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)  # ✅ 64-bit
     is_enabled = Column(Boolean, default=False)
     content = Column(Text, default="")
     interval_minutes = Column(Integer, default=60)
@@ -106,30 +105,30 @@ class PromoSetting(Base):
 class Warning(Base):
     __tablename__ = "warnings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
-    user_id = Column(BigInteger, index=True)
+    chat_id = Column(BigInteger, index=True)  # ✅ 64-bit
+    user_id = Column(BigInteger, index=True)  # ✅ 64-bit
     count = Column(Integer, default=0)
     last_warned = Column(DateTime, default=func.now())
 
 class Blacklist(Base):
     __tablename__ = "blacklists"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True)
-    user_id = Column(BigInteger, index=True)
+    chat_id = Column(BigInteger, index=True)  # ✅ 64-bit
+    user_id = Column(BigInteger, index=True)  # ✅ 64-bit
     created_at = Column(DateTime, default=func.now())
 
 # --- Support mode (per-group) ---
 class SupportSetting(Base):
     __tablename__ = "support_settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True, nullable=False, unique=True)
+    chat_id = Column(BigInteger, index=True, nullable=False, unique=True)  # ✅ 64-bit
     is_enabled = Column(Boolean, default=False)
 
 class Supporter(Base):
     __tablename__ = "supporters"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True, nullable=False)
-    user_id = Column(BigInteger, index=True, nullable=False)
+    chat_id = Column(BigInteger, index=True, nullable=False)   # ✅ 64-bit
+    user_id = Column(BigInteger, index=True, nullable=False)   # ✅ 64-bit
     note = Column(String(120), default="")
     __table_args__ = (UniqueConstraint('chat_id', 'user_id', name='uix_supporter_chat_user'),)
 
