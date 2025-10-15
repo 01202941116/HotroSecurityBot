@@ -1,69 +1,235 @@
 # admin_panel.py
-# Simplified admin panel for HotroSecurityBot
-# Installation:
-# 1. Put this file into your project root (same level as main.py)
-# 2. In keep_alive_server.py, add:
-#       from admin_panel import admin_bp, init_admin_panel
-#       init_admin_panel()
-#       app.register_blueprint(admin_bp, url_prefix="/admin")
-# 3. On Render, add environment variable ADMIN_PASSWORD
-# 4. Access via: https://your-app.onrender.com/admin
+from datetime import datetime, timedelta
 import os
-from flask import Blueprint, request, redirect, url_for, render_template_string, session
-from sqlalchemy import func
-from functools import wraps
-try:
-    from core.models import SessionLocal, User, LicenseKey, Whitelist, Filter
-except:
-    raise ImportError("⚠️ Cannot import core.models. Make sure project structure matches your bot.")
+from flask import Blueprint, request, redirect, url_for, Response
 
+from core.models import SessionLocal, User, LicenseKey
+
+# Tạo blueprint cho trang /admin
 admin_bp = Blueprint("admin", __name__)
-_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
-_SESSION_KEY = os.getenv("ADMIN_SECRET", os.getenv("BOT_TOKEN", "secret"))
 
-def init_admin_panel():
-    try:
-        import keep_alive_server as kas
-        if getattr(kas, "app", None):
-            kas.app.secret_key = _SESSION_KEY
-    except Exception as e:
-        print("[admin_panel] init error:", e)
+# ===== Auth rất nhẹ (tuỳ chọn) =====
+# Đặt biến môi trường ADMIN_TOKEN (Render -> Environment) để bắt buộc ?token=...
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 
-def _require_login(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if not session.get("is_admin"):
-            return redirect(url_for("admin.login", next=request.path))
-        return f(*args, **kwargs)
-    return wrapper
+def _require_admin(req: request) -> bool:
+    if not ADMIN_TOKEN:   # không đặt token => mở tự do (test nội bộ)
+        return True
+    return req.args.get("token") == ADMIN_TOKEN
 
-def _layout(title, body):
-    return render_template_string(f"""<!DOCTYPE html>
-    <html><head><meta charset='utf-8'><title>{title}</title>
-    <style>body{{background:#0f172a;color:#fff;font-family:sans-serif;padding:20px}}
-    a{{color:#4ade80}}table{{width:100%;border-collapse:collapse}}td,th{{border-bottom:1px solid #333;padding:6px}}</style></head>
-    <body><h2>{title}</h2><p><a href='/admin'>🏠 Dashboard</a> | <a href='/admin/logout'>🚪 Logout</a></p>{body}</body></html>""")
+def _html(title: str, body: str) -> Response:
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>{title}</title>
+      <style>
+        body {{ background:#0f1624; color:#cde3ff; font-family: Arial, sans-serif; }}
+        a {{ color:#9bd3ff; text-decoration:none; }}
+        table {{ border-collapse: collapse; width:100%; max-width:1080px; }}
+        th, td {{ border:1px solid #2b415b; padding:8px; }}
+        th {{ background:#152235; }}
+        .wrap {{ max-width:1080px; margin:24px auto; }}
+        .nav a {{ margin-right:12px; }}
+        .btn {{ margin-right:6px; }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="nav">
+          <a href="{url_for('admin.dashboard')}">🏠 Dashboard</a>
+          <a href="{url_for('admin.users')}">👥 Users</a>
+          <a href="{url_for('admin.keys')}">🔑 Keys</a>
+        </div>
+        {body}
+      </div>
+    </body>
+    </html>
+    """
+    return Response(html)
 
-@admin_bp.route("/login", methods=["GET","POST"])
-def login():
-    if request.method == "POST":
-        if request.form.get("password") == _ADMIN_PASSWORD:
-            session["is_admin"] = True
-            return redirect("/admin")
-    return _layout("Login", "<form method='post'><input name='password' type='password' placeholder='Password'><button>Login</button></form>")
+def _fmt_dt(dt: datetime | None) -> str:
+    if not dt:
+        return "—"
+    return dt.strftime("%Y-%m-%d %H:%M")
 
-@admin_bp.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/admin/login")
+def _days_left(expires_at: datetime | None) -> str:
+    if not expires_at:
+        return "0"
+    return str((expires_at - datetime.utcnow()).days)
 
+# ===== Dashboard =====
 @admin_bp.route("/")
-@_require_login
 def dashboard():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
     db = SessionLocal()
-    users = db.query(func.count(User.id)).scalar() or 0
-    keys = db.query(func.count(LicenseKey.id)).scalar() or 0
-    wl = db.query(func.count(Whitelist.id)).scalar() or 0
-    flt = db.query(func.count(Filter.id)).scalar() or 0
-    db.close()
-    return _layout("Dashboard", f"<ul><li>👤 Users: {users}</li><li>🔑 Keys: {keys}</li><li>✅ Whitelist: {wl}</li><li>🚫 Filters: {flt}</li></ul>")
+    try:
+        users = db.query(User).count()
+        keys = db.query(LicenseKey).count()
+        body = f"""
+        <h1>Dashboard</h1>
+        <ul>
+          <li>Users: <b>{users}</b></li>
+          <li>Keys: <b>{keys}</b></li>
+        </ul>
+        """
+        return _html("Admin Dashboard", body)
+    finally:
+        db.close()
+
+# ===== Users + Extend / Set FREE =====
+@admin_bp.route("/users")
+def users():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    db = SessionLocal()
+    try:
+        rows = db.query(User).order_by(User.id.desc()).limit(200).all()
+        trs = []
+        for u in rows:
+            trs.append(f"""
+            <tr>
+              <td>{u.id}</td>
+              <td>{u.username or ''}</td>
+              <td>{'PRO' if u.is_pro else 'FREE'}</td>
+              <td>{_fmt_dt(u.pro_expires_at)} (left: {_days_left(u.pro_expires_at)}d)</td>
+              <td>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=365)}">+365d</a>
+                <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
+              </td>
+            </tr>
+            """)
+        body = f"""
+        <h2>Users</h2>
+        <table>
+          <tr>
+            <th>User ID</th><th>Username</th><th>TIER</th><th>Expires</th><th>Actions</th>
+          </tr>
+          {''.join(trs) or '<tr><td colspan="5">Empty</td></tr>'}
+        </table>
+        """
+        return _html("Admin - Users", body)
+    finally:
+        db.close()
+
+@admin_bp.route("/extend_user")
+def extend_user():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    uid = int(request.args.get("user_id", "0"))
+    days = int(request.args.get("days", "30"))
+    db = SessionLocal()
+    try:
+        u = db.get(User, uid)
+        if not u:
+            return _html("Extend", f"<p>User {uid} not found.</p><p><a href='{url_for('admin.users')}'>Back</a></p>")
+        now = datetime.utcnow()
+        if not u.pro_expires_at or u.pro_expires_at < now:
+            u.pro_expires_at = now + timedelta(days=days)
+        else:
+            u.pro_expires_at = u.pro_expires_at + timedelta(days=days)
+        u.is_pro = True
+        db.commit()
+        return redirect(url_for('admin.users'))
+    finally:
+        db.close()
+
+@admin_bp.route("/set_free")
+def set_free():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    uid = int(request.args.get("user_id", "0"))
+    db = SessionLocal()
+    try:
+        u = db.get(User, uid)
+        if u:
+            u.is_pro = False
+            u.pro_expires_at = None
+            db.commit()
+        return redirect(url_for('admin.users'))
+    finally:
+        db.close()
+
+# ===== Keys + Create / Delete =====
+@admin_bp.route("/keys")
+def keys():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    db = SessionLocal()
+    try:
+        rows = db.query(LicenseKey).order_by(LicenseKey.id.desc()).limit(200).all()
+        trs = []
+        for k in rows:
+            status = "USED" if k.used else "NEW"
+            trs.append(f"""
+            <tr>
+              <td>{k.id}</td>
+              <td>{k.key}</td>
+              <td>{k.tier}</td>
+              <td>{k.days}d</td>
+              <td>{k.issued_to or ''}</td>
+              <td>{status}</td>
+              <td><a class="btn" href="{url_for('admin.delete_key', key_id=k.id)}">Delete</a></td>
+            </tr>
+            """)
+        form = f"""
+        <form method="post" action="{url_for('admin.create_key')}">
+          <h3>Create key</h3>
+          Days: <input type="number" name="days" value="30" style="width:80px" />
+          Tier: <input type="text" name="tier" value="pro" style="width:100px" />
+          <button type="submit">Create</button>
+        </form>
+        """
+        body = f"""
+        <h2>Keys</h2>
+        {form}
+        <br/>
+        <table>
+          <tr>
+            <th>ID</th><th>Key</th><th>Tier</th><th>Days</th><th>IssuedTo</th><th>Status</th><th>Actions</th>
+          </tr>
+          {''.join(trs) or '<tr><td colspan="7">Empty</td></tr>'}
+        </table>
+        """
+        return _html("Admin - Keys", body)
+    finally:
+        db.close()
+
+@admin_bp.route("/keys/create", methods=["POST"])
+def create_key():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    import secrets
+    days = max(1, int(request.form.get("days", "30")))
+    tier = (request.form.get("tier", "pro") or "pro").strip()
+
+    db = SessionLocal()
+    try:
+        key = f"KEY-{secrets.token_urlsafe(12)}"
+        db.add(LicenseKey(key=key, tier=tier, days=days))
+        db.commit()
+        return redirect(url_for('admin.keys'))
+    finally:
+        db.close()
+
+@admin_bp.route("/keys/delete")
+def delete_key():
+    if not _require_admin(request):
+        return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
+    key_id = int(request.args.get("key_id", "0"))
+    db = SessionLocal()
+    try:
+        k = db.get(LicenseKey, key_id)
+        if k:
+            db.delete(k)
+            db.commit()
+        return redirect(url_for('admin.keys'))
+    finally:
+        db.close()
+
+# ===== helper để gọi từ keep_alive_server hoặc main =====
+def init_admin_panel(app):
+    app.register_blueprint(admin_bp, url_prefix="/admin")
