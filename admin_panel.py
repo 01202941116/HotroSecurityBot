@@ -5,15 +5,16 @@ from flask import Blueprint, request, redirect, url_for, Response
 
 from core.models import SessionLocal, User, LicenseKey
 
-# Tạo blueprint cho trang /admin
+# ===== Blueprint cho trang /admin =====
 admin_bp = Blueprint("admin", __name__)
 
 # ===== Auth rất nhẹ (tuỳ chọn) =====
 # Đặt biến môi trường ADMIN_TOKEN (Render -> Environment) để bắt buộc ?token=...
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 
-def _require_admin(req: request) -> bool:
-    if not ADMIN_TOKEN:   # không đặt token => mở tự do (test nội bộ)
+def _require_admin(req) -> bool:
+    """Nếu có ADMIN_TOKEN thì bắt buộc query '?token=...'; ngược lại mở tự do (cho test)."""
+    if not ADMIN_TOKEN:
         return True
     return req.args.get("token") == ADMIN_TOKEN
 
@@ -231,5 +232,12 @@ def delete_key():
         db.close()
 
 # ===== helper để gọi từ keep_alive_server hoặc main =====
-def init_admin_panel(app):
-    app.register_blueprint(admin_bp, url_prefix="/admin")
+def init_admin_panel(app=None):
+    """
+    Tuỳ chọn:
+    - init_admin_panel(app): đăng ký ngay vào app
+    - hoặc chỉ import admin_bp và tự app.register_blueprint(admin_bp, url_prefix='/admin')
+    """
+    if app is not None:
+        app.register_blueprint(admin_bp, url_prefix="/admin")
+    return admin_bp
