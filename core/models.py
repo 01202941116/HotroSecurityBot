@@ -38,7 +38,8 @@ def add_days(d: int):
 # ===== ENTITIES =====
 class User(Base):
     __tablename__ = "users"
-    id = Column(BigInteger, primary_key=True)           # ✅ Telegram user id 64-bit
+    id = Column(BigInteger, primary_key=True)  # đổi sang BigInteger
+    ...          # ✅ Telegram user id 64-bit
     username = Column(String, nullable=True)
     is_pro = Column(Boolean, default=False)
     pro_expires_at = Column(DateTime, nullable=True)
