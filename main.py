@@ -302,11 +302,39 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
-    if w.count >= 3:
-        bl = db.query(Blacklist).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
-        if not bl:
-            db.add(Blacklist(chat_id=chat_id, user_id=target_user.id))
-        db.commit()
+        # --- AUTO BAN theo số lần cảnh cáo ---
+    # 3-4 lần: mute 24h
+    # >=5 lần: ban hẳn khỏi nhóm
+    try:
+        if 3 <= w.count < 5:
+            until = datetime.now(timezone.utc) + timedelta(hours=24)
+            await context.bot.restrict_chat_member(
+                chat_id,
+                target_user.id,
+                ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            await context.bot.send_message(
+                chat_id,
+                "🚫 Người này bị cấm 24h do vi phạm nhiều lần (>=3).",
+                parse_mode=ParseMode.HTML
+            )
+
+        elif w.count >= 5:
+            # Ban hẳn
+            await context.bot.ban_chat_member(chat_id, target_user.id)
+            await context.bot.send_message(
+                chat_id,
+                "⛔️ Người này đã bị kick khỏi nhóm do tái phạm quá nhiều lần (>=5).",
+                parse_mode=ParseMode.HTML
+            )
+            # (tuỳ chọn) đưa vào blacklist DB để ghi nhận
+            bl = db.query(Blacklist).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
+            if not bl:
+                db.add(Blacklist(chat_id=chat_id, user_id=target_user.id))
+            db.commit()
+    except Exception:
+        pass
 
         await context.bot.send_message(
             chat_id,
