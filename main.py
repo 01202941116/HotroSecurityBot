@@ -487,9 +487,17 @@ def main():
     except Exception as e:
         print("Lỗi keep_alive:", e)
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.post_init = on_startup
+    app = (
+    Application.builder()
+    .token(BOT_TOKEN)
+    .post_init(on_startup)
+    .build()
+)
+    app.add_handler(CommandHandler("start", start))
+    # ...
     app.add_error_handler(on_error)
+    app.post_init = None  # bỏ dòng gán on_startup
+
 
     # Commands
     app.add_handler(CommandHandler("start", start))
