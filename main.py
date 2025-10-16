@@ -516,6 +516,9 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
+    app.add_handler(CommandHandler("warn_info", warn_info))
+    app.add_handler(CommandHandler("warn_clear", warn_clear))
+    app.add_handler(CommandHandler("warn_top", warn_top))
 
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
