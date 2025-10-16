@@ -125,8 +125,7 @@ def _fmt_td(td: timedelta) -> str:
     return " ".join(parts)
 
 # ====== Helpers ======
-def get_settings(chat_id: int) -> Setting:
-    db = SessionLocal()
+def get_settings(db, chat_id: int) -> Setting:
     s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
     if not s:
         s = Setting(
@@ -139,6 +138,7 @@ def get_settings(chat_id: int) -> Setting:
         )
         db.add(s)
         db.commit()
+        # optional: db.refresh(s)
     return s
 
 # ====== ADMIN / GROUP CHECKS ======
