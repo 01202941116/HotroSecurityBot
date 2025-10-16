@@ -518,19 +518,12 @@ def main():
     except Exception as e:
         print("Lỗi keep_alive:", e)
 
-    app = (
-    Application.builder()
-    .token(BOT_TOKEN)
-    .post_init(on_startup)
-    .build()
-)
-    app.add_handler(CommandHandler("start", start))
-    # ...
+    # Build app một lần, dùng post_init chuẩn
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.post_init = on_startup
     app.add_error_handler(on_error)
-    app.post_init = None  # bỏ dòng gán on_startup
 
-
-    # Commands
+    # ==== Commands (đăng ký MỘT lần) ====
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("lang", lang_cmd))
@@ -560,18 +553,19 @@ def main():
     app.add_handler(CommandHandler("warn_clear", warn_clear))
     app.add_handler(CommandHandler("warn_top", warn_top))
 
-    # PRO (trial/redeem/genkey/ad_*, wl_del, wl_list…)
+    # PRO (an toàn nếu thiếu module)
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
 
     # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
 
-    # Guard
+    # Guard: lọc tin nhắn thường
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
 
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
+
 # ====== FILTERS & TOGGLES ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
