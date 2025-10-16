@@ -125,21 +125,51 @@ def _fmt_td(td: timedelta) -> str:
     return " ".join(parts)
 
 # ====== Helpers ======
-def get_settings(db, chat_id: int) -> Setting:
-    s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
-    if not s:
-        s = Setting(
-            chat_id=chat_id,
-            antilink=True,
-            antimention=True,
-            antiforward=True,
-            flood_limit=3,
-            flood_mode="mute",
-        )
-        db.add(s)
-        db.commit()
-        # optional: db.refresh(s)
-    return s
+def get_settings(*args, **kwargs) -> Setting:
+    """
+    Tương thích 2 kiểu:
+      - get_settings(chat_id)              # tự mở/đóng DB (an toàn pool)
+      - get_settings(db, chat_id)          # dùng phiên DB có sẵn (không đóng)
+    """
+    # Kiểu 1 tham số: chat_id
+    if len(args) == 1 and isinstance(args[0], int):
+        chat_id = args[0]
+        db = SessionLocal()
+        try:
+            s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+            if not s:
+                s = Setting(
+                    chat_id=chat_id,
+                    antilink=True,
+                    antimention=True,
+                    antiforward=True,
+                    flood_limit=3,
+                    flood_mode="mute",
+                )
+                db.add(s)
+                db.commit()
+            return s
+        finally:
+            db.close()
+
+    # Kiểu 2 tham số: (db, chat_id)
+    if len(args) == 2:
+        db, chat_id = args
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(
+                chat_id=chat_id,
+                antilink=True,
+                antimention=True,
+                antiforward=True,
+                flood_limit=3,
+                flood_mode="mute",
+            )
+            db.add(s)
+            db.commit()
+        return s
+
+    raise TypeError("get_settings() expected (chat_id) or (db, chat_id)")
 
 # ====== ADMIN / GROUP CHECKS ======
 async def _must_admin_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
