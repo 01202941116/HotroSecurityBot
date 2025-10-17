@@ -746,7 +746,19 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
-
+# ====== Chặn lệnh không hợp lệ ======
+async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    text = (msg.text or "").strip()
+    if not text.startswith("/"):
+        return
+    # lấy phần lệnh, bỏ @BotName và tham số
+    cmd = text.split()[0].split("@")[0].lower()
+    if cmd not in {c.lower() for c in ALLOWED_COMMANDS}:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 # ====== Entry point (đặt CUỐI FILE) ======
 if __name__ == "__main__":
     main()
