@@ -94,7 +94,7 @@ def users():
               <td>{u.id}</td>
               <td>{u.username or ''}</td>
               <td>{'PRO' if u.is_pro else 'FREE'}</td>
-              <td>{_fmt_dt(u.pro_expires_at)} (left: {_days_left(u.pro_expires_at)}d)</td>
+              <td>{_fmt_dt(u.pro_expires_at)} (left: {_human_left(u.pro_expires_at)})</td>
               <td>
                 <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
                 <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
