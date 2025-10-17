@@ -600,6 +600,7 @@ def main():
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
+    
 
     # FREE: whitelist (ở file này chỉ /wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
@@ -628,6 +629,8 @@ def main():
 
     # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
+    # Chặn mọi lệnh không được cho phép
+    app.add_handler(MessageHandler(filters.COMMAND, block_unknown_commands))
 
     # Guard: lọc tin nhắn thường
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
