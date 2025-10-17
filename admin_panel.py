@@ -151,7 +151,7 @@ def users():
         <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
       </td>
     </tr>
-            """)
+    """)
         body = f"""
         <h2>Users</h2>
         <table>
