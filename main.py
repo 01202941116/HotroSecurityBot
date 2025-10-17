@@ -441,66 +441,105 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
-    if msg.text and msg.text.startswith("/"):
-        return
 
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    user = update.effective_user
     text = (msg.text or msg.caption or "")
     low = text.lower()
 
+    # 1) Chặn lệnh giả (bắt đầu bằng "/") nếu KHÔNG thuộc danh sách cho phép
+    if text.startswith("/"):
+        cmd = text.split()[0].lower()
+
+        # Cho admin/creator được phép gõ mọi lệnh (không bị xoá)
+        try:
+            member = await context.bot.get_chat_member(chat.id, user.id)
+            is_admin = member.status in ("administrator", "creator")
+        except Exception:
+            is_admin = False
+
+        if not is_admin and cmd not in ALLOWED_COMMANDS:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            return  # dừng luôn, không xử lý tiếp
+
+        # Nếu là lệnh hợp lệ thì để handler của CommandHandler xử lý, guard không đụng vào
+        return
+
+    # 2) Lọc nội dung thường
+    chat_id = chat.id
     db = SessionLocal()
-    s = get_settings(chat_id)
+    try:
+        # Dùng get_settings với phiên DB đã mở (tránh mở thêm phiên → đỡ lỗi pool)
+        s = get_settings(db, chat_id)
 
-    for it in db.query(Filter).filter_by(chat_id=chat_id).all():
-        if it.pattern and it.pattern.lower() in low:
-            try: await msg.delete()
-            except Exception: pass
-            db.close(); return
+        # 2.1. Từ khóa filter
+        for it in db.query(Filter).filter_by(chat_id=chat_id).all():
+            if it.pattern and it.pattern.lower() in low:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
-    if s.antiforward and getattr(msg, "forward_origin", None):
-        try: await msg.delete()
-        except Exception: pass
-        db.close(); return
+        # 2.2. Chặn tin nhắn forward
+        if s.antiforward and getattr(msg, "forward_origin", None):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            return
 
-    if s.antilink and LINK_RE.search(text):
-        wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-        is_whitelisted = any(d and d in low for d in wl)
+        # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
+        if s.antilink and LINK_RE.search(text):
+            wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            is_whitelisted = any(d and d in low for d in wl)
 
-        allow_support = False
-        try:
-            if get_support_enabled(db, chat_id):
-                sup_ids = list_supporters(db, chat_id)
-                allow_support = msg.from_user.id in sup_ids
-        except Exception:
             allow_support = False
+            try:
+                if get_support_enabled(db, chat_id):
+                    sup_ids = list_supporters(db, chat_id)
+                    allow_support = user.id in sup_ids
+            except Exception:
+                allow_support = False
 
-        if not is_whitelisted and not allow_support:
-            try: await msg.delete()
-            except Exception: pass
-            db.close(); return
+            if not is_whitelisted and not allow_support:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
-    if s.antimention:
-        text_no_urls = URL_RE.sub("", text)
-        if "@" in text_no_urls:
-            try: await msg.delete()
-            except Exception: pass
-            db.close(); return
+        # 2.4. Chặn mention (loại URL ra trước khi kiểm)
+        if s.antimention:
+            text_no_urls = URL_RE.sub("", text)
+            if "@" in text_no_urls:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
-    key = (chat_id, msg.from_user.id)
-    now_ts = datetime.now(timezone.utc).timestamp()
-    bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
-    bucket.append(now_ts); FLOOD[key] = bucket
-    if len(bucket) > s.flood_limit and s.flood_mode == "mute":
-        try:
-            until = datetime.now(timezone.utc) + timedelta(minutes=5)
-            await context.bot.restrict_chat_member(
-                chat_id, msg.from_user.id,
-                ChatPermissions(can_send_messages=False),
-                until_date=until
-            )
-        except Exception:
-            pass
-    db.close()
+        # 2.5. Chống flood nhẹ
+        key = (chat_id, user.id)
+        now_ts = datetime.now(timezone.utc).timestamp()
+        bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
+        bucket.append(now_ts)
+        FLOOD[key] = bucket
+        if len(bucket) > s.flood_limit and s.flood_mode == "mute":
+            try:
+                until = datetime.now(timezone.utc) + timedelta(minutes=5)
+                await context.bot.restrict_chat_member(
+                    chat_id, user.id,
+                    ChatPermissions(can_send_messages=False),
+                    until_date=until
+                )
+            except Exception:
+                pass
+    finally:
+        db.close()
 
 # ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
