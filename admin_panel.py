@@ -55,6 +55,33 @@ def _fmt_dt(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 def _human_left(expires_at: datetime | None) -> str:
+def _is_trial(db, u: User) -> bool:
+    """Xác định user có đang dùng thử không.
+    Ưu tiên theo key (issued_to == user.id và days <= 7), fallback theo thời gian còn lại."""
+    try:
+        # issued_to lưu chuỗi; một số DB bạn lưu user_id dạng str
+        uid_str = str(u.id)
+        k = (
+            db.query(LicenseKey)
+              .filter(LicenseKey.issued_to == uid_str)
+              .order_by(LicenseKey.id.desc())
+              .first()
+        )
+        if k and k.days and k.days <= 7:
+            return True
+    except Exception:
+        pass
+
+    # Fallback: còn lại <= 7 ngày
+    if u.is_pro and u.pro_expires_at:
+        return (u.pro_expires_at - datetime.utcnow()) <= timedelta(days=7)
+    return False
+
+
+def _trial_badge(is_trial: bool) -> str:
+    if not is_trial:
+        return ""
+    return '<span style="margin-left:6px;padding:2px 6px;border-radius:6px;background:#2a3b55;color:#ffd38a;font-size:12px;">TRIAL</span>'
     """
     Hiển thị thời gian còn lại/đã hết hạn dạng '5d 12h' hoặc 'expired 3d 2h'.
     Không ảnh hưởng tới logic hết hạn thật trong DB.
