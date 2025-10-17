@@ -14,7 +14,20 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters, CallbackQueryHandler
 )
-
+# ====== CHO PHÉP NHỮNG LỆNH NÀO ======
+ALLOWED_COMMANDS = {
+    "/start", "/help", "/lang", "/stats", "/status", "/uptime", "/ping",
+    "/wl_add",
+    "/filter_add", "/filter_list", "/filter_del",
+    "/antilink_on", "/antilink_off",
+    "/antimention_on", "/antimention_off",
+    "/antiforward_on", "/antiforward_off",
+    "/setflood",
+    "/warn", "/warn_info", "/warn_clear", "/warn_top",
+    "/trial", "/redeem", "/genkey",
+    "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
+    "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
+}
 # ====== LOCAL MODELS (gộp 1 lần) ======
 from core.models import (
     init_db, SessionLocal, Setting, Filter, Whitelist,
