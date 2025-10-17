@@ -12,11 +12,13 @@ admin_bp = Blueprint("admin", __name__)
 # Đặt biến môi trường ADMIN_TOKEN (Render -> Environment) để bắt buộc ?token=...
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 
+
 def _require_admin(req) -> bool:
     """Nếu có ADMIN_TOKEN thì bắt buộc query '?token=...'; ngược lại mở tự do (cho test)."""
     if not ADMIN_TOKEN:
         return True
     return req.args.get("token") == ADMIN_TOKEN
+
 
 def _html(title: str, body: str) -> Response:
     html = f"""
@@ -49,39 +51,14 @@ def _html(title: str, body: str) -> Response:
     """
     return Response(html)
 
+
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return "—"
     return dt.strftime("%Y-%m-%d %H:%M")
 
+
 def _human_left(expires_at: datetime | None) -> str:
-def _is_trial(db, u: User) -> bool:
-    """Xác định user có đang dùng thử không.
-    Ưu tiên theo key (issued_to == user.id và days <= 7), fallback theo thời gian còn lại."""
-    try:
-        # issued_to lưu chuỗi; một số DB bạn lưu user_id dạng str
-        uid_str = str(u.id)
-        k = (
-            db.query(LicenseKey)
-              .filter(LicenseKey.issued_to == uid_str)
-              .order_by(LicenseKey.id.desc())
-              .first()
-        )
-        if k and k.days and k.days <= 7:
-            return True
-    except Exception:
-        pass
-
-    # Fallback: còn lại <= 7 ngày
-    if u.is_pro and u.pro_expires_at:
-        return (u.pro_expires_at - datetime.utcnow()) <= timedelta(days=7)
-    return False
-
-
-def _trial_badge(is_trial: bool) -> str:
-    if not is_trial:
-        return ""
-    return '<span style="margin-left:6px;padding:2px 6px;border-radius:6px;background:#2a3b55;color:#ffd38a;font-size:12px;">TRIAL</span>'
     """
     Hiển thị thời gian còn lại/đã hết hạn dạng '5d 12h' hoặc 'expired 3d 2h'.
     Không ảnh hưởng tới logic hết hạn thật trong DB.
@@ -97,10 +74,43 @@ def _trial_badge(is_trial: bool) -> str:
     days = delta.days
     hours = delta.seconds // 3600
     if days == 0 and hours == 0:
-        # < 1h
         mins = (delta.seconds % 3600) // 60
         return f"{sign}{mins}m"
     return f"{sign}{days}d {hours}h"
+
+
+def _is_trial(db, u: User) -> bool:
+    """Xác định user có đang dùng thử không.
+    Ưu tiên theo key (issued_to == user.id và days <= 7),
+    fallback theo thời gian còn lại <= 7 ngày.
+    """
+    try:
+        uid_str = str(u.id)
+        k = (
+            db.query(LicenseKey)
+            .filter(LicenseKey.issued_to == uid_str)
+            .order_by(LicenseKey.id.desc())
+            .first()
+        )
+        if k and k.days and k.days <= 7:
+            return True
+    except Exception:
+        pass
+
+    if u.is_pro and u.pro_expires_at:
+        return (u.pro_expires_at - datetime.utcnow()) <= timedelta(days=7)
+    return False
+
+
+def _trial_badge(is_trial: bool) -> str:
+    if not is_trial:
+        return ""
+    return (
+        '<span style="margin-left:6px;padding:2px 6px;'
+        'border-radius:6px;background:#2a3b55;color:#ffd38a;'
+        'font-size:12px;">TRIAL</span>'
+    )
+
 
 # ===== Dashboard =====
 @admin_bp.route("/")
@@ -122,6 +132,7 @@ def dashboard():
     finally:
         db.close()
 
+
 # ===== Users + Extend / Set FREE =====
 @admin_bp.route("/users")
 def users():
@@ -132,26 +143,27 @@ def users():
         rows = db.query(User).order_by(User.id.desc()).limit(200).all()
         trs = []
         for u in rows:
-    tier = "PRO" if u.is_pro else "FREE"
-    expires = _fmt_dt(u.pro_expires_at)
-    left_human = _human_left(u.pro_expires_at)
-    trial = _is_trial(db, u)
-    badge = _trial_badge(trial)
+            tier = "PRO" if u.is_pro else "FREE"
+            expires = _fmt_dt(u.pro_expires_at)
+            left_human = _human_left(u.pro_expires_at)
+            trial = _is_trial(db, u)
+            badge = _trial_badge(trial)
 
-    trs.append(f"""
-    <tr>
-      <td>{u.id}</td>
-      <td>{u.username or ''}</td>
-      <td>{tier}{badge}</td>
-      <td>{expires} (left: {left_human})</td>
-      <td>
-        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
-        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
-        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=365)}">+365d</a>
-        <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
-      </td>
-    </tr>
-    """)
+            trs.append(f"""
+            <tr>
+              <td>{u.id}</td>
+              <td>{u.username or ''}</td>
+              <td>{tier}{badge}</td>
+              <td>{expires} (left: {left_human})</td>
+              <td>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
+                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=365)}">+365d</a>
+                <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
+              </td>
+            </tr>
+            """)
+
         body = f"""
         <h2>Users</h2>
         <table>
@@ -165,6 +177,7 @@ def users():
     finally:
         db.close()
 
+
 @admin_bp.route("/extend_user")
 def extend_user():
     if not _require_admin(request):
@@ -175,7 +188,10 @@ def extend_user():
     try:
         u = db.get(User, uid)
         if not u:
-            return _html("Extend", f"<p>User {uid} not found.</p><p><a href='{url_for('admin.users')}'>Back</a></p>")
+            return _html(
+                "Extend",
+                f"<p>User {uid} not found.</p><p><a href='{url_for('admin.users')}'>Back</a></p>",
+            )
         now = datetime.utcnow()
         if not u.pro_expires_at or u.pro_expires_at < now:
             u.pro_expires_at = now + timedelta(days=days)
@@ -183,9 +199,10 @@ def extend_user():
             u.pro_expires_at = u.pro_expires_at + timedelta(days=days)
         u.is_pro = True
         db.commit()
-        return redirect(url_for('admin.users'))
+        return redirect(url_for("admin.users"))
     finally:
         db.close()
+
 
 @admin_bp.route("/set_free")
 def set_free():
@@ -199,9 +216,10 @@ def set_free():
             u.is_pro = False
             u.pro_expires_at = None
             db.commit()
-        return redirect(url_for('admin.users'))
+        return redirect(url_for("admin.users"))
     finally:
         db.close()
+
 
 # ===== Keys + Create / Delete =====
 @admin_bp.route("/keys")
@@ -225,6 +243,7 @@ def keys():
               <td><a class="btn" href="{url_for('admin.delete_key', key_id=k.id)}">Delete</a></td>
             </tr>
             """)
+
         form = f"""
         <form method="post" action="{url_for('admin.create_key')}">
           <h3>Create key</h3>
@@ -233,6 +252,7 @@ def keys():
           <button type="submit">Create</button>
         </form>
         """
+
         body = f"""
         <h2>Keys</h2>
         {form}
@@ -248,11 +268,13 @@ def keys():
     finally:
         db.close()
 
+
 @admin_bp.route("/keys/create", methods=["POST"])
 def create_key():
     if not _require_admin(request):
         return _html("Forbidden", "<h3>Forbidden (missing ?token)</h3>")
     import secrets
+
     days = max(1, int(request.form.get("days", "30")))
     tier = (request.form.get("tier", "pro") or "pro").strip()
 
@@ -261,9 +283,10 @@ def create_key():
         key = f"KEY-{secrets.token_urlsafe(12)}"
         db.add(LicenseKey(key=key, tier=tier, days=days))
         db.commit()
-        return redirect(url_for('admin.keys'))
+        return redirect(url_for("admin.keys"))
     finally:
         db.close()
+
 
 @admin_bp.route("/keys/delete")
 def delete_key():
@@ -276,9 +299,10 @@ def delete_key():
         if k:
             db.delete(k)
             db.commit()
-        return redirect(url_for('admin.keys'))
+        return redirect(url_for("admin.keys"))
     finally:
         db.close()
+
 
 # ===== helper để gọi từ keep_alive_server hoặc main =====
 def init_admin_panel(app=None):
