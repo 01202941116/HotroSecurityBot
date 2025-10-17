@@ -132,22 +132,25 @@ def users():
         rows = db.query(User).order_by(User.id.desc()).limit(200).all()
         trs = []
         for u in rows:
-            tier = "PRO" if u.is_pro else "FREE"
-            expires = _fmt_dt(u.pro_expires_at)
-            left_human = _human_left(u.pro_expires_at)
-            trs.append(f"""
-            <tr>
-              <td>{u.id}</td>
-              <td>{u.username or ''}</td>
-              <td>{tier}</td>
-              <td>{expires} (left: {left_human})</td>
-              <td>
-                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
-                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
-                <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=365)}">+365d</a>
-                <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
-              </td>
-            </tr>
+    tier = "PRO" if u.is_pro else "FREE"
+    expires = _fmt_dt(u.pro_expires_at)
+    left_human = _human_left(u.pro_expires_at)
+    trial = _is_trial(db, u)
+    badge = _trial_badge(trial)
+
+    trs.append(f"""
+    <tr>
+      <td>{u.id}</td>
+      <td>{u.username or ''}</td>
+      <td>{tier}{badge}</td>
+      <td>{expires} (left: {left_human})</td>
+      <td>
+        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
+        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
+        <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=365)}">+365d</a>
+        <a class="btn" href="{url_for('admin.set_free', user_id=u.id)}">Set FREE</a>
+      </td>
+    </tr>
             """)
         body = f"""
         <h2>Users</h2>
