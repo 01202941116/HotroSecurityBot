@@ -54,10 +54,26 @@ def _fmt_dt(dt: datetime | None) -> str:
         return "—"
     return dt.strftime("%Y-%m-%d %H:%M")
 
-def _days_left(expires_at: datetime | None) -> str:
+def _human_left(expires_at: datetime | None) -> str:
+    """
+    Hiển thị thời gian còn lại/đã hết hạn dạng '5d 12h' hoặc 'expired 3d 2h'.
+    Không ảnh hưởng tới logic hết hạn thật trong DB.
+    """
     if not expires_at:
-        return "0"
-    return str((expires_at - datetime.utcnow()).days)
+        return "0d"
+    delta = expires_at - datetime.utcnow()
+    sign = ""
+    if delta.total_seconds() <= 0:
+        delta = -delta
+        sign = "expired "
+
+    days = delta.days
+    hours = delta.seconds // 3600
+    if days == 0 and hours == 0:
+        # < 1h
+        mins = (delta.seconds % 3600) // 60
+        return f"{sign}{mins}m"
+    return f"{sign}{days}d {hours}h"
 
 # ===== Dashboard =====
 @admin_bp.route("/")
@@ -89,12 +105,15 @@ def users():
         rows = db.query(User).order_by(User.id.desc()).limit(200).all()
         trs = []
         for u in rows:
+            tier = "PRO" if u.is_pro else "FREE"
+            expires = _fmt_dt(u.pro_expires_at)
+            left_human = _human_left(u.pro_expires_at)
             trs.append(f"""
             <tr>
               <td>{u.id}</td>
               <td>{u.username or ''}</td>
-              <td>{'PRO' if u.is_pro else 'FREE'}</td>
-              <td>{_fmt_dt(u.pro_expires_at)} (left: {_human_left(u.pro_expires_at)})</td>
+              <td>{tier}</td>
+              <td>{expires} (left: {left_human})</td>
               <td>
                 <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=30)}">+30d</a>
                 <a class="btn" href="{url_for('admin.extend_user', user_id=u.id, days=90)}">+90d</a>
