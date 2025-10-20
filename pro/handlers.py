@@ -110,34 +110,32 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = _ensure_user(db, u.id, u.username)
         now = now_aw()
 
-        exp = ensure_aware(user.pro_expires_at)
-        if user.is_pro and exp and exp > now:
-            remain = exp - now
+        # 1) Nếu đang có PRO (từ key hoặc bất kỳ), trả về "đang có PRO" (không gọi là dùng thử)
+        exp_user = ensure_aware(user.pro_expires_at)
+        if user.is_pro and exp_user and exp_user > now:
+            remain = exp_user - now
             days = max(0, remain.days)
-            return await m.reply_text(t(lang, "trial_active", days=days))
+            # i18n: thêm key mới "pro_active" => "Bạn đang có gói PRO, còn {days} ngày."
+            return await m.reply_text(t(lang, "pro_active", days=days))
 
+        # 2) Kiểm tra Trial
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
+                # Đang dùng thử còn hạn
                 d = (t_exp - now).days
                 return await m.reply_text(t(lang, "trial_active", days=d))
-            if not trow.active:
-                return await m.reply_text(t(lang, "trial_end"))
+            # ĐÃ dùng thử trước đây (hết hạn). Không cho dùng lại.
+            return await m.reply_text(t(lang, "trial_end"))
 
+        # 3) Chưa từng dùng thử -> cấp 7 ngày
         exp_new = now + timedelta(days=7)
-        if not trow:
-            trow = Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True)
-            db.add(trow)
-        else:
-            trow.started_at = now
-            trow.expires_at = exp_new
-            trow.active = True
-
+        db.add(Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True))
         user.is_pro = True
         user.pro_expires_at = exp_new
         db.commit()
-        await m.reply_text(t(lang, "trial_started"))
+        return await m.reply_text(t(lang, "trial_started"))
     finally:
         db.close()
 
@@ -160,10 +158,16 @@ async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         days = lk.days or 30
         user.is_pro = True
         user.pro_expires_at = now_aw() + timedelta(days=days)
+
+        # Tắt trial nếu tồn tại
+        trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
+        if trow:
+            trow.active = False
+
         lk.used = True
-        lk.issued_to = u.id
+        lk.issued_to = str(u.id)  # nên lưu chuỗi để khớp với admin panel so sánh string
         db.commit()
-        await m.reply_text(t(lang, "genkey_created").replace("{days}", str(days)))
+        await m.reply_text(t(lang, "redeem_ok").replace("{days}", str(days)))
     finally:
         db.close()
 
