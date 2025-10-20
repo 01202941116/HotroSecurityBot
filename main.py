@@ -55,7 +55,40 @@ def _get_target_user(update: Update, args) -> tuple[int | None, str]:
         except Exception:
             return None, ""
     return None, ""
+async def delete_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xoá các lệnh gõ trong group nếu:
+       - không nằm trong ALLOWED_COMMANDS, hoặc
+       - người gõ KHÔNG phải admin/owner.
+       => Luôn xoá ngay để tránh spam / quảng cáo.
+    """
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat or chat.type not in ("group", "supergroup"):
+        return
 
+    text = msg.text or ""
+    cmd = text.split()[0].lower()
+
+    # Owner luôn được phép
+    if update.effective_user and update.effective_user.id == OWNER_ID:
+        return
+
+    # Cho admin qua nếu lệnh hợp lệ
+    try:
+        member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+        is_admin = member.status in ("administrator", "creator")
+    except Exception:
+        is_admin = False
+
+    # Nếu là admin và lệnh trong danh sách -> không xoá
+    if is_admin and cmd in ALLOWED_COMMANDS:
+        return
+
+    # Nếu không phải admin HOẶC lệnh không nằm trong danh sách -> xoá
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 # ====== ENV ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
@@ -614,6 +647,13 @@ def main():
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
     
+    # Đăng ký XOÁ COMMAND trước
+    app.add_handler(MessageHandler(filters.COMMAND, delete_commands), group=-1)
+
+    # Rồi mới tới các CommandHandler của bạn
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    # ... (các lệnh còn lại)
 
     # FREE: whitelist (ở file này chỉ /wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
