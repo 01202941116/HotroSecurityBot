@@ -8,6 +8,7 @@ from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
+from telegram.ext import ApplicationHandlerStop
 from telegram.constants import ParseMode
 from telegram.error import Conflict
 from telegram.ext import (
@@ -68,6 +69,12 @@ async def delete_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = msg.text or ""
     cmd = text.split()[0].lower()
+    
+    # ... sau khi quyết định phải xóa
+    await msg.delete()
+
+    # chặn tất cả handler phía sau (CommandHandler sẽ không chạy nữa)
+    raise ApplicationHandlerStop
 
     # Owner luôn được phép
     if update.effective_user and update.effective_user.id == OWNER_ID:
