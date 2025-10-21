@@ -57,23 +57,46 @@ def _get_target_user(update: Update, args) -> tuple[int | None, str]:
             return None, ""
     return None, ""
 async def delete_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xoá các lệnh gõ trong group nếu:
-       - không nằm trong ALLOWED_COMMANDS, hoặc
-       - người gõ KHÔNG phải admin/owner.
-       => Luôn xoá ngay để tránh spam / quảng cáo.
+    """
+    Chỉ chạy ở group. Giữ lại lệnh nếu:
+      - Owner, hoặc
+      - Admin/creator và lệnh thuộc ALLOWED_COMMANDS.
+    Các trường hợp còn lại: xoá & chặn handler phía sau.
     """
     msg = update.effective_message
     chat = update.effective_chat
     if not msg or not chat or chat.type not in ("group", "supergroup"):
         return
 
-    text = msg.text or ""
-    cmd = text.split()[0].lower()
-    
-    # ... sau khi quyết định phải xóa
-    await msg.delete()
+    text = (msg.text or msg.caption or "")
+    if not text.startswith("/"):
+        return
 
-    # chặn tất cả handler phía sau (CommandHandler sẽ không chạy nữa)
+    # chuẩn hoá lệnh: lấy token đầu và bỏ @BotUserName
+    cmd_token = text.split()[0].strip()
+    cmd_core  = cmd_token.split("@", 1)[0].lower()
+
+    # Owner luôn qua nếu lệnh hợp lệ
+    if update.effective_user and update.effective_user.id == OWNER_ID and cmd_core in ALLOWED_COMMANDS:
+        return
+
+    # kiểm tra admin
+    is_admin = False
+    try:
+        member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+        is_admin = member.status in ("administrator", "creator")
+    except Exception:
+        is_admin = False
+
+    # admin/creator: chỉ cho qua nếu lệnh trong whitelist
+    if is_admin and cmd_core in ALLOWED_COMMANDS:
+        return
+
+    # các trường hợp còn lại → xoá & chặn
+    try:
+        await msg.delete()
+    except Exception:
+        pass
     raise ApplicationHandlerStop
 
     # Owner luôn được phép
@@ -494,6 +517,10 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
         return
+
+    text = (msg.text or msg.caption or "")
+    if text.startswith("/"):
+        return  # để delete_commands/CommandHandler xử lý
 
     chat = update.effective_chat
     user = update.effective_user
