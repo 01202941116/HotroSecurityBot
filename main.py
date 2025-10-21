@@ -854,7 +854,11 @@ async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         s = get_settings(db, chat.id)
         if not hasattr(s, "nobots") or s.nobots is None:
-            s.nobots = True
+    try:
+        s.nobots = True
+        db.commit()
+    except Exception:
+        pass
 
         if not s.nobots:
             return
