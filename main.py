@@ -228,7 +228,14 @@ def get_settings(*args, **kwargs) -> Setting:
             return s
         finally:
             db.close()
+   if not hasattr(s, "nobots") or s.nobots is None:
+    try:
+        s.nobots = True
+        db.commit()
+    except Exception:
+        pass
 
+return s
     # Kiểu 2 tham số: (db, chat_id)
     if len(args) == 2:
         db, chat_id = args
@@ -245,11 +252,16 @@ def get_settings(*args, **kwargs) -> Setting:
             db.add(s)
             db.commit()
         return s
+     if not hasattr(s, "nobots") or s.nobots is None:
+    try:
+        s.nobots = True
+        db.commit()
+    except Exception:
+        pass
 
+return s
     raise TypeError("get_settings() expected (chat_id) or (db, chat_id)")
-# nếu DB cũ chưa có cột, đảm bảo có thuộc tính ở runtime
-if not hasattr(s, "nobots") or s.nobots is None:
-    s.nobots = True
+
 # ====== ADMIN / GROUP CHECKS ======
 async def _must_admin_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     chat = update.effective_chat
