@@ -29,85 +29,6 @@ ALLOWED_COMMANDS = {
     "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
 }
-# ====== UPDATES / THÔNG BÁO CẬP NHẬT ======
-async def updates_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Người dùng đăng ký nhận thông báo cập nhật (DM)."""
-    u = update.effective_user
-    db = SessionLocal()
-    try:
-        from core.models import UpdateSubscriber
-        if not db.get(UpdateSubscriber, u.id):
-            db.add(UpdateSubscriber(user_id=u.id, username=u.username or ""))
-            db.commit()
-        await update.effective_message.reply_text(
-            "✅ Đã đăng ký nhận thông báo cập nhật (DM).\n"
-            "Lưu ý: bạn phải từng /start bot trong DM để nhận được tin nhắn."
-        )
-    finally:
-        db.close()
-
-async def updates_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Huỷ nhận thông báo cập nhật."""
-    u = update.effective_user
-    db = SessionLocal()
-    try:
-        from core.models import UpdateSubscriber
-        it = db.get(UpdateSubscriber, u.id)
-        if it:
-            db.delete(it); db.commit()
-            msg = "❎ Đã huỷ nhận thông báo cập nhật."
-        else:
-            msg = "Bạn chưa đăng ký."
-        await update.effective_message.reply_text(msg)
-    finally:
-        db.close()
-
-
-async def announce(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """OWNER gửi thông báo cập nhật cho người đăng ký, lọc theo gói."""
-    if update.effective_user.id != OWNER_ID:
-        return await update.effective_message.reply_text("Lệnh này chỉ dành cho OWNER.")
-
-    # parse tier flag
-    args = context.args or []
-    tier = "all"
-    if args and args[0].startswith("--tier="):
-        tier = args[0].split("=",1)[1].strip().lower()
-        args = args[1:]
-    body = " ".join(args).strip()
-    if not body:
-        return await update.effective_message.reply_text(
-            "Dùng: /announce [--tier=all|free|pro] <nội dung>"
-        )
-
-    db = SessionLocal()
-    try:
-        from core.models import UpdateSubscriber
-        subs = db.query(UpdateSubscriber).all()
-        total = len(subs); sent = 0
-        for s in subs:
-            try:
-                u_tier = _user_tier(db, s.user_id)  # 'FREE' hoặc 'PRO'
-                if tier == "pro" and u_tier != "PRO":
-                    continue
-                if tier == "free" and u_tier != "FREE":
-                    continue
-
-                tag = "PRO" if u_tier == "PRO" else "FREE"
-                msg = (
-                    f"📢 <b>Cập nhật mới cho gói {tag}</b>\n"
-                    f"{body}"
-                )
-                await context.bot.send_message(
-                    s.user_id, msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-                )
-                sent += 1
-            except Exception:
-                pass
-    finally:
-        db.close()
-
-    await update.effective_message.reply_text(f"Đã gửi: {sent}/{total} người đăng ký.")
 # ====== LOCAL MODELS (gộp 1 lần) ======
 from core.models import (
     init_db, SessionLocal, Setting, Filter, Whitelist,
@@ -189,18 +110,7 @@ def host_allowed(host: str, allow_list: list[str]) -> bool:
         if host == d or host.endswith("." + d):
             return True
     return False
-# ====== XÁC ĐỊNH GÓI (FREE / PRO) ======
-def _user_tier(db, user_id: int) -> str:
-    """Trả về 'PRO' nếu PRO còn hạn hoặc đang TRIAL; ngược lại 'FREE'."""
-    from core.models import User, Trial
-    now = utcnow()
-    u = db.query(User).filter_by(id=user_id).one_or_none()
-    if u and u.is_pro and u.pro_expires_at and u.pro_expires_at > now:
-        return "PRO"
-    t = db.query(Trial).filter_by(user_id=user_id, active=True).one_or_none()
-    if t and t.expires_at and t.expires_at > now:
-        return "PRO"
-    return "FREE"
+
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
     from pro.handlers import register_handlers  # (PRO: không đăng ký wl_add tại đây)
@@ -704,10 +614,6 @@ def main():
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
-    app.add_handler(CommandHandler("updates_on", updates_on))
-    app.add_handler(CommandHandler("updates_off", updates_off))
-    app.add_handler(CommandHandler("announce", announce))
-
     
 
     # FREE: whitelist (ở file này chỉ /wl_add)
