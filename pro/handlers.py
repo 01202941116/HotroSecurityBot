@@ -110,38 +110,17 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = _ensure_user(db, u.id, u.username)
         now = now_aw()
 
-        # 1) Nếu đang có PRO (từ key hoặc bất kỳ), trả về "đang có PRO" (không gọi là dùng thử)
-        exp_user = ensure_aware(user.pro_expires_at)
-        if user.is_pro and exp_user and exp_user > now:
-            remain = exp_user - now
-            days = max(0, remain.days)
-            # i18n: thêm key mới "pro_active" => "Bạn đang có gói PRO, còn {days} ngày."
-            return await m.reply_text(t(lang, "pro_active", days=days))
-
-        # 2) Kiểm tra Trial
+        # 1) Nếu đang ở TRIAL còn hạn -> báo Trial
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
-                # Đang dùng thử còn hạn
                 d = (t_exp - now).days
                 return await m.reply_text(t(lang, "trial_active", days=d))
-            # ĐÃ dùng thử trước đây (hết hạn). Không cho dùng lại.
-            return await m.reply_text(t(lang, "trial_end"))
-
-        # 3) Chưa từng dùng thử -> cấp 7 ngày
-        exp_new = now + timedelta(days=7)
-        db.add(Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True))
-        user.is_pro = True
-        user.pro_expires_at = exp_new
-        db.commit()
-        return await m.reply_text(t(lang, "trial_started"))
-    finally:
-        db.close()
-
 async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     lang = _lang(update)
+
     if not context.args:
         return await m.reply_text(t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
 
@@ -159,23 +138,27 @@ async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.is_pro = True
         user.pro_expires_at = now_aw() + timedelta(days=days)
 
-        # Tắt trial nếu tồn tại
-        trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
-        if trow:
-            trow.active = False
-
         lk.used = True
-        lk.issued_to = str(u.id)  # nên lưu chuỗi để khớp với admin panel so sánh string
+        lk.issued_to = u.id
+
         db.commit()
-        await m.reply_text(t(lang, "redeem_ok").replace("{days}", str(days)))
+        await m.reply_text(t(lang, "redeem_ok", days=days))
     finally:
         db.close()
+
 
 async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_id: int = 0):
     m = update.effective_message
     lang = _lang(update)
-    if not _is_owner(owner_id, update.effective_user.id):
+
+    # chỉ owner mới tạo key
+    try:
+        if int(update.effective_user.id) != int(owner_id):
+            return await m.reply_text(t(lang, "genkey_denied"))
+    except Exception:
         return await m.reply_text(t(lang, "genkey_denied"))
+
+    # số ngày
     days = 30
     if context.args:
         try:
@@ -184,18 +167,46 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
             return await m.reply_text(t(lang, "genkey_usage"), parse_mode=ParseMode.HTML)
 
     code = "PRO-" + secrets.token_urlsafe(12).upper()
+
     db = SessionLocal()
     try:
         lk = LicenseKey(key=code, days=days)
         db.add(lk)
         db.commit()
         await m.reply_text(
-            t(lang, "genkey_created").replace("{days}", str(days)).replace("{code}", f"<code>{code}</code>"),
+            t(lang, "genkey_created")
+              .replace("{days}", str(days))
+              .replace("{code}", f"<code>{code}</code>"),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
     finally:
+        db.close()             
+
+        # 2) Nếu đã có PRO (key) còn hạn -> báo PRO
+        exp = ensure_aware(user.pro_expires_at)
+        if user.is_pro and exp and exp > now and not (trow and trow.active and trow.expires_at and ensure_aware(trow.expires_at) > now):
+            remain = exp - now
+            days = max(0, remain.days)
+            return await m.reply_text(t(lang, "pro_active", days=days))
+
+        # 3) Chưa có gì -> cấp TRIAL 7 ngày
+        exp_new = now + timedelta(days=7)
+        if not trow:
+            trow = Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True)
+            db.add(trow)
+        else:
+            trow.started_at = now
+            trow.expires_at = exp_new
+            trow.active = True
+
+        user.is_pro = True
+        user.pro_expires_at = exp_new
+        db.commit()
+        await m.reply_text(t(lang, "trial_started"))
+    finally:
         db.close()
+
 
 # ------------------------ Whitelist (PRO: wl_del, wl_list) ------------------------
 async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
