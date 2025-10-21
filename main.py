@@ -22,6 +22,7 @@ ALLOWED_COMMANDS = {
     "/antilink_on", "/antilink_off",
     "/antimention_on", "/antimention_off",
     "/antiforward_on", "/antiforward_off",
+    "/nobots_on", "/nobots_off",
     "/setflood",
     "/warn", "/warn_info", "/warn_clear", "/warn_top",
     "/trial", "/redeem", "/genkey",
@@ -629,7 +630,8 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
-
+    app.add_handler(CommandHandler("nobots_on", nobots_on))
+    app.add_handler(CommandHandler("nobots_off", nobots_off))
     # Warn utilities
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warn_info", warn_info))
@@ -647,7 +649,11 @@ def main():
 
     # Guard: lọc tin nhắn thường
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
-
+    # Lắng nghe thành viên mới vào nhóm để đá bot khi cần
+    app.add_handler(MessageHandler(
+    filters.StatusUpdate.NEW_CHAT_MEMBERS, 
+    on_new_member
+))
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
@@ -762,6 +768,56 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
+async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = True
+        db.commit()
+        await update.effective_message.reply_text("✅ Đã bật chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
+async def nobots_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = False
+        db.commit()
+        await update.effective_message.reply_text("❎ Đã tắt chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
+async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat:
+        return
+    if not getattr(msg, "new_chat_members", None):
+        return
+
+    db = SessionLocal()
+    try:
+        s = get_settings(db, chat.id)
+        if not s.nobots:
+            return
+        for m in msg.new_chat_members:
+            if m.is_bot:
+                try:
+                    await context.bot.ban_chat_member(chat.id, m.id)
+                    await msg.reply_text(
+                        f"🤖 Đã xoá bot <b>{m.first_name}</b> (nobots đang bật).",
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as e:
+                    print("Kick bot failed:", e)
+    finally:
+        db.close()
+        
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
