@@ -362,7 +362,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def register_handlers(app: Application, owner_id: int | None = None):
     # /lang đã được đăng ký ở main.py (tránh trùng)
     app.add_handler(CommandHandler("pro", pro_cmd))
-    app.add_handler(CommandHandler("trial", trial_cmd))
+    app.add_handler(CommandHandler("trial",  trial_cmd))
     app.add_handler(CommandHandler("redeem", redeem_cmd))
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
     # Support Mode
