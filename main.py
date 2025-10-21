@@ -205,8 +205,8 @@ def _fmt_td(td: timedelta) -> str:
 def get_settings(*args, **kwargs) -> Setting:
     """
     Tương thích 2 kiểu:
-      - get_settings(chat_id)              # tự mở/đóng DB (an toàn pool)
-      - get_settings(db, chat_id)          # dùng phiên DB có sẵn (không đóng)
+      - get_settings(chat_id)
+      - get_settings(db, chat_id)
     """
     # Kiểu 1 tham số: chat_id
     if len(args) == 1 and isinstance(args[0], int):
@@ -222,20 +222,23 @@ def get_settings(*args, **kwargs) -> Setting:
                     antiforward=True,
                     flood_limit=3,
                     flood_mode="mute",
+                    nobots=True,
                 )
                 db.add(s)
                 db.commit()
+
+            # Đảm bảo có cột nobots trong DB cũ
+            if not hasattr(s, "nobots") or s.nobots is None:
+                try:
+                    s.nobots = True
+                    db.commit()
+                except Exception:
+                    pass
+
             return s
         finally:
             db.close()
-   if not hasattr(s, "nobots") or s.nobots is None:
-    try:
-        s.nobots = True
-        db.commit()
-    except Exception:
-        pass
 
-return s
     # Kiểu 2 tham số: (db, chat_id)
     if len(args) == 2:
         db, chat_id = args
@@ -248,18 +251,21 @@ return s
                 antiforward=True,
                 flood_limit=3,
                 flood_mode="mute",
+                nobots=True,
             )
             db.add(s)
             db.commit()
-        return s
-     if not hasattr(s, "nobots") or s.nobots is None:
-    try:
-        s.nobots = True
-        db.commit()
-    except Exception:
-        pass
 
-return s
+        # Đảm bảo có cột nobots
+        if not hasattr(s, "nobots") or s.nobots is None:
+            try:
+                s.nobots = True
+                db.commit()
+            except Exception:
+                pass
+
+        return s
+
     raise TypeError("get_settings() expected (chat_id) or (db, chat_id)")
 
 # ====== ADMIN / GROUP CHECKS ======
