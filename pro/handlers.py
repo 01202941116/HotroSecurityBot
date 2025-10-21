@@ -157,13 +157,13 @@ async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.is_pro = True
         user.pro_expires_at = now_aw() + timedelta(days=days)
 
-        # Tắt trial nếu tồn tại
+        # tắt trial nếu có
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             trow.active = False
 
         lk.used = True
-        lk.issued_to = str(u.id)  # nên lưu chuỗi để khớp với admin panel so sánh string
+        lk.issued_to = u.id          # cột issued_to là BigInteger → lưu int
         db.commit()
         await m.reply_text(t(lang, "redeem_ok").replace("{days}", str(days)))
     finally:
