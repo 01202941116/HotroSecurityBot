@@ -99,10 +99,10 @@ class Captcha(Base):
 class PromoSetting(Base):
     __tablename__ = "promo_settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)  # 64-bit
+    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
     is_enabled = Column(Boolean, default=False)
     content = Column(Text, default="")
-    interval_minutes = b = Column(Integer, default=60)
+    interval_minutes = Column(Integer, default=60)   # <— SỬA CHỖ NÀY (xóa "b =")
     last_sent_at = Column(DateTime, nullable=True, default=None)
 
 class Warning(Base):
