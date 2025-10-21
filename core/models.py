@@ -1,7 +1,9 @@
 # core/models.py
 from datetime import datetime, timedelta
 import os
-
+from __future__ import annotations  # (giúp hoãn đánh giá annotation, an toàn)
+from typing import Optional
+from sqlalchemy.orm import Session
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
     BigInteger, Text, UniqueConstraint, text
@@ -167,14 +169,14 @@ def init_db() -> None:
         print("[migrate] settings.nobots note:", e)
 
 # ====== Convenience queries ======
-def count_users(session: SessionLocal | None = None) -> int:
+def count_users(session: Optional[Session] = None) -> int:
     s = session or SessionLocal()
     try:
         return s.query(User).count()
     finally:
         if session is None:
             s.close()
-
+            
 def get_support_enabled(db: SessionLocal, ch_id: int) -> bool:
     s = db.query(SupportSetting).filter_by(card_id=ch_id).one_or_none()
     return bool(s and s.is_enabled)
