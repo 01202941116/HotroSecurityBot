@@ -110,26 +110,24 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = _ensure_user(db, u.id, u.username)
         now = now_aw()
 
-        # 1) Nếu đang có PRO (từ key hoặc bất kỳ), trả về "đang có PRO" (không gọi là dùng thử)
+        # 1) Nếu đã có PRO (từ key hoặc do trước đó được set), báo "đang có PRO"
         exp_user = ensure_aware(user.pro_expires_at)
         if user.is_pro and exp_user and exp_user > now:
             remain = exp_user - now
             days = max(0, remain.days)
-            # i18n: thêm key mới "pro_active" => "Bạn đang có gói PRO, còn {days} ngày."
             return await m.reply_text(t(lang, "pro_active", days=days))
 
-        # 2) Kiểm tra Trial
+        # 2) Nếu đã có TRIAL còn hạn -> báo "đang dùng thử"
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
-                # Đang dùng thử còn hạn
                 d = (t_exp - now).days
                 return await m.reply_text(t(lang, "trial_active", days=d))
-            # ĐÃ dùng thử trước đây (hết hạn). Không cho dùng lại.
+            # đã từng trial nhưng hết hạn -> không cấp lại
             return await m.reply_text(t(lang, "trial_end"))
 
-        # 3) Chưa từng dùng thử -> cấp 7 ngày
+        # 3) Chưa từng trial -> cấp 7 ngày + set PRO = True trong 7 ngày đó
         exp_new = now + timedelta(days=7)
         db.add(Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True))
         user.is_pro = True
