@@ -148,31 +148,43 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
                 
 async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhập key PRO."""
     m = update.effective_message
     lang = _lang(update)
-
-    if not context.args:
-        return await m.reply_text(t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
-
-    key = context.args[0].strip()
+    args = context.args
     db = SessionLocal()
+
     try:
-        lk = db.query(LicenseKey).filter_by(key=key).one_or_none()
-        if not lk or lk.used:
-            return await m.reply_text(t(lang, "redeem_invalid"))
+        if not args:
+            await m.reply_text(t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
+            return
 
-        u = update.effective_user
-        user = _ensure_user(db, u.id, u.username)
+        key_input = args[0].strip()
+        if not key_input:
+            await m.reply_text(t(lang, "redeem_usage"), parse_mode=ParseMode.HTML)
+            return
 
-        days = lk.days or 30
+        key = db.query(LicenseKey).filter_by(code=key_input, used=False).one_or_none()
+        if not key:
+            await m.reply_text(t(lang, "redeem_invalid"))
+            return
+
+        # Cập nhật key và user
+        user = _ensure_user(db, update.effective_user.id, update.effective_user.username)
+        now = now_aw()
+        exp = now + timedelta(days=key.days)
+
+        key.used = True
+        key.used_by = user.id
+        key.used_at = now
+
         user.is_pro = True
-        user.pro_expires_at = now_aw() + timedelta(days=days)
-
-        lk.used = True
-        lk.issued_to = u.id
-
+        user.pro_expires_at = exp
         db.commit()
-        await m.reply_text(t(lang, "redeem_ok", days=days))
+
+        await m.reply_text(t(lang, "redeem_ok", days=key.days))
+    except Exception as e:
+        await m.reply_text(f"Lỗi: {e}")
     finally:
         db.close()
 
