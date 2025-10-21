@@ -6,6 +6,21 @@ from sqlalchemy import (
     BigInteger, func, inspect, text, Text, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import Boolean, Column, Integer, BigInteger, String, DateTime, Text
+
+class Setting(Base):
+    __tablename__ = "settings"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, index=True, unique=True, nullable=False)
+
+    antilink = Column(Boolean, default=True)
+    antimention = Column(Boolean, default=True)
+    antiforward = Column(Boolean, default=True)
+    flood_limit = Column(Integer, default=3)
+    flood_mode = Column(String, default="mute")
+
+    # NEW: chặn bot mới vào nhóm
+    nobots = Column(Boolean, default=True)   # <--- thêm dòng này
 
 # ===== DB CONFIG =====
 # Dùng DATABASE_URL của Render nếu có, fallback về SQLite khi test local
@@ -151,7 +166,20 @@ def init_db():
                 conn.execute(text("ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"))
     except Exception as e:
         print("[migrate] promo_settings migration note:", e)
+def init_db():
+    Base.metadata.create_all(bind=engine)
 
+    # --- thêm cột nobots nếu thiếu (SQLite/Postgres đều ổn) ---
+    try:
+        with engine.connect() as conn:
+            # thử select, nếu lỗi -> cột chưa tồn tại
+            conn.exec_driver_sql("SELECT nobots FROM settings LIMIT 1")
+    except Exception:
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN nobots BOOLEAN DEFAULT 1")
+        except Exception as e:
+            print("WARN: cannot add 'nobots' column:", e)
 # ===== HELPERS =====
 def count_users(session=None) -> int:
     """Đếm tổng số người dùng (User) trong CSDL."""
