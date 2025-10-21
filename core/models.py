@@ -76,8 +76,8 @@ class Setting(Base):
     antimention = Column(Boolean, default=True)
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
-    flood_mode = Column(String, default="mute")
-
+    flood_mode = Column(String, default="mute")    
+    nobots = Column(Boolean, default=True
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
@@ -151,6 +151,20 @@ def init_db():
                 conn.execute(text("ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"))
     except Exception as e:
         print("[migrate] promo_settings migration note:", e)
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+    # --- đảm bảo bảng settings có cột 'nobots' (idempotent) ---
+    try:
+        insp = inspect(engine)
+        cols = {c["name"] for c in insp.get_columns("settings")}
+        if "nobots" not in cols:
+            # Dùng TRUE (boolean) để tránh cảnh báo Postgres “integer vs boolean”
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN nobots BOOLEAN DEFAULT TRUE"))
+                conn.execute(text("UPDATE settings SET nobots = TRUE WHERE nobots IS NULL"))
+    except Exception as e:
+        print("[migrate] settings.nobots note:", e)
 
 # ===== HELPERS =====
 def count_users(session=None) -> int:
