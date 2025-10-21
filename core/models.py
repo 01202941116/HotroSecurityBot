@@ -135,10 +135,13 @@ class Supporter(Base):
 
 # ===== INIT / MIGRATION =====
 def init_db():
-    """Tạo bảng và migrate nhẹ cho promo_settings."""
+    """Tạo bảng và migrate nhẹ cho promo_settings + đảm bảo settings.nobots."""
     Base.metadata.create_all(bind=engine)
+
+    insp = inspect(engine)
+
+    # --- ensure promo_settings columns ---
     try:
-        insp = inspect(engine)
         cols = {c["name"] for c in insp.get_columns("promo_settings")}
         with engine.begin() as conn:
             if "is_enabled" not in cols:
@@ -151,15 +154,11 @@ def init_db():
                 conn.execute(text("ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"))
     except Exception as e:
         print("[migrate] promo_settings migration note:", e)
-def init_db():
-    Base.metadata.create_all(bind=engine)
 
-    # --- đảm bảo bảng settings có cột 'nobots' (idempotent) ---
+    # --- ensure settings.nobots (BOOLEAN TRUE) ---
     try:
-        insp = inspect(engine)
-        cols = {c["name"] for c in insp.get_columns("settings")}
-        if "nobots" not in cols:
-            # Dùng TRUE (boolean) để tránh cảnh báo Postgres “integer vs boolean”
+        cols_settings = {c["name"] for c in insp.get_columns("settings")}
+        if "nobots" not in cols_settings:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE settings ADD COLUMN nobots BOOLEAN DEFAULT TRUE"))
                 conn.execute(text("UPDATE settings SET nobots = TRUE WHERE nobots IS NULL"))
