@@ -110,7 +110,18 @@ def host_allowed(host: str, allow_list: list[str]) -> bool:
         if host == d or host.endswith("." + d):
             return True
     return False
-
+# ====== XÁC ĐỊNH GÓI (FREE / PRO) ======
+def _user_tier(db, user_id: int) -> str:
+    """Trả về 'PRO' nếu PRO còn hạn hoặc đang TRIAL; ngược lại 'FREE'."""
+    from core.models import User, Trial
+    now = utcnow()
+    u = db.query(User).filter_by(id=user_id).one_or_none()
+    if u and u.is_pro and u.pro_expires_at and u.pro_expires_at > now:
+        return "PRO"
+    t = db.query(Trial).filter_by(user_id=user_id, active=True).one_or_none()
+    if t and t.expires_at and t.expires_at > now:
+        return "PRO"
+    return "FREE"
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
     from pro.handlers import register_handlers  # (PRO: không đăng ký wl_add tại đây)
