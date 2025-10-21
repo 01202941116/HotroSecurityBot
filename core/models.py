@@ -77,7 +77,7 @@ class Setting(Base):
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
     flood_mode = Column(String, default="mute")    
-    nobots = Column(Boolean, default=True
+    nobots = Column(Boolean, default=True)
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
