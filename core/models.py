@@ -1,23 +1,22 @@
 # core/models.py
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 import os
-from __future__ import annotations  # (giúp hoãn đánh giá annotation, an toàn)
-from typing import Optional
-from sqlalchemy.orm import Session
+from typing import Optional, List
+
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
-    BigInteger, Text, UniqueConstraint, text
+    BigInteger, Text, UniqueConstraint, text, inspect
 )
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from sqlalchemy.sql import func
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import inspect
 
 # ====== Base / Session / Engine ======
 Base = declarative_base()
 
 DB_URL = os.getenv("DATABASE_URL", os.getenv("LICENSE_DB_URL", "sqlite:///licenses.db"))
 if DB_URL.startswith("postgres://"):
-    # Render uses non-sqlalchemy prefix sometimes
     DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 
 connect_args = {}
@@ -80,7 +79,7 @@ class Setting(Base):
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
     flood_mode = Column(String, default="mute")
-    # NEW: block newly joined bots if True
+    # NEW: chặn bot mới vào nhóm
     nobots = Column(Boolean, default=True)
 
 class Whitelist(Base):
@@ -104,7 +103,7 @@ class PromoSetting(Base):
     chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
     is_enabled = Column(Boolean, default=False)
     content = Column(Text, default="")
-    interval_minutes = Column(Integer, default=60)   # <— SỬA CHỖ NÀY (xóa "b =")
+    interval_minutes = Column(Integer, default=60)
     last_sent_at = Column(DateTime, nullable=True, default=None)
 
 class Warning(Base):
@@ -126,14 +125,14 @@ class Blacklist(Base):
 class SupportSetting(Base):
     __tablename__ = "support_settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True, nullable=False, unique=True)  # 64-bit
+    chat_id = Column(BigInteger, index=True, nullable=False, unique=True)
     is_enabled = Column(Boolean, default=False)
 
 class Supporter(Base):
     __tablename__ = "supporters"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, index=True, nullable=False)               # 64-bit
-    user_id = Column(BigInteger, index=True, nullable=False)               # 64-bit
+    chat_id = Column(BigInteger, index=True, nullable=False)
+    user_id = Column(BigInteger, index=True, nullable=False)
     note = Column(String(120), default="")
     __table_args__ = (UniqueConstraint("chat_id", "user_id", name="uix_supporter_chat_user"),)
 
@@ -143,8 +142,8 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
     insp = inspect(engine)
+    # -- promo_settings columns (idempotent) --
     try:
-        # Ensure promo_settings has all expected columns (idempotent)
         cols = {c["name"] for c in insp.get_columns("promo_settings")}
         with engine.begin() as conn:
             if "is_enabled" not in cols:
@@ -156,10 +155,9 @@ def init_db() -> None:
             if "last_sent_at" not in cols:
                 conn.execute(text("ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"))
     except Exception as e:
-        # table might not exist yet in some fresh setups; safe to ignore after create_all
         print("[migrate] promo_settings note:", e)
 
-    # ensure settings.nobots exists
+    # -- settings.nobots column --
     try:
         cols_settings = {c["name"] for c in insp.get_columns("settings")}
         if "nobots" not in cols_settings:
@@ -176,10 +174,10 @@ def count_users(session: Optional[Session] = None) -> int:
     finally:
         if session is None:
             s.close()
-            
-def get_support_enabled(db: SessionLocal, ch_id: int) -> bool:
-    s = db.query(SupportSetting).filter_by(card_id=ch_id).one_or_none()
-    return bool(s and s.is_enabled)
 
-def list_supporters(db: SessionLocal, ch_id: int) -> list[int]:
-    return [r.user_id for r in db.query(Supporter).filter_by(chat_id=ch_id).all()]
+def get_support_enabled(db: Session, chat_id: int) -> bool:
+    row = db.query(SupportSetting).filter_by(chat_id=chat_id).one_or_none()
+    return bool(row and row.is_enabled)
+
+def list_supporters(db: Session, chat_id: int) -> list[int]:
+    return [r.user_id for r in db.query(Supporter).filter_by(chat_id=chat_id).all()]
