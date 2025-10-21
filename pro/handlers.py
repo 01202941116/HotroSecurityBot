@@ -110,13 +110,43 @@ async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = _ensure_user(db, u.id, u.username)
         now = now_aw()
 
-        # 1) Nếu đang ở TRIAL còn hạn -> báo Trial
+        # 1) ƯU TIÊN kiểm TRIAL trước
         trow = db.query(Trial).filter_by(user_id=u.id).one_or_none()
         if trow:
             t_exp = ensure_aware(trow.expires_at)
             if trow.active and t_exp and t_exp > now:
-                d = (t_exp - now).days
-                return await m.reply_text(t(lang, "trial_active", days=d))
+                # đang ở trial -> báo TRIAL còn bao nhiêu ngày
+                days = max(0, (t_exp - now).days)
+                await m.reply_text(t(lang, "trial_active", days=days))
+                return
+
+        # 2) Nếu KHÔNG có trial còn hạn, kiểm PRO (đã nhập key)
+        exp = ensure_aware(user.pro_expires_at)
+        if user.is_pro and exp and exp > now:
+            days = max(0, (exp - now).days)
+            await m.reply_text(t(lang, "pro_active", days=days))
+            return
+
+        # 3) Chưa có gì -> cấp TRIAL 7 ngày
+        exp_new = now + timedelta(days=7)
+        if not trow:
+            trow = Trial(user_id=u.id, started_at=now, expires_at=exp_new, active=True)
+            db.add(trow)
+        else:
+            trow.started_at = now
+            trow.expires_at = exp_new
+            trow.active = True
+
+        # Giữ cách cũ: set is_pro để dùng chung check quyền,
+        # nhưng nhờ ưu tiên TRIAL ở trên nên hiển thị sẽ đúng.
+        user.is_pro = True
+        user.pro_expires_at = exp_new
+
+        db.commit()
+        await m.reply_text(t(lang, "trial_started"))
+    finally:
+        db.close()
+                
 async def redeem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     lang = _lang(update)
