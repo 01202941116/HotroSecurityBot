@@ -71,13 +71,13 @@ class Filter(Base):
 class Setting(Base):
     __tablename__ = "settings"
     id = Column(Integer, primary_key=True)
-    chat_id = Column(BigInteger, unique=True, index=True)  # ✅ 64-bit
+    chat_id = Column(BigInteger, unique=True, index=True)
     antilink = Column(Boolean, default=True)
     antimention = Column(Boolean, default=True)
     antiforward = Column(Boolean, default=True)
     flood_limit = Column(Integer, default=3)
-    flood_mode = Column(String, default="mute")    
-    nobots = Column(Boolean, default=True)
+    flood_mode = Column(String, default="mute")
+    nobots = Column(Boolean, default=True)   # <-- nhớ có dấu ")"
 class Whitelist(Base):
     __tablename__ = "whitelist"
     id = Column(Integer, primary_key=True)
