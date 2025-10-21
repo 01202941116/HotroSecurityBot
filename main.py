@@ -28,6 +28,7 @@ ALLOWED_COMMANDS = {
     "/trial", "/redeem", "/genkey",
     "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
+    "/nobots_on", "/nobots_off"
 }
 # ====== LOCAL MODELS (gộp 1 lần) ======
 from core.models import (
@@ -246,7 +247,9 @@ def get_settings(*args, **kwargs) -> Setting:
         return s
 
     raise TypeError("get_settings() expected (chat_id) or (db, chat_id)")
-
+# nếu DB cũ chưa có cột, đảm bảo có thuộc tính ở runtime
+if not hasattr(s, "nobots") or s.nobots is None:
+    s.nobots = True
 # ====== ADMIN / GROUP CHECKS ======
 async def _must_admin_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     chat = update.effective_chat
@@ -703,7 +706,11 @@ def main():
     app.add_handler(CommandHandler("antiforward_on", antiforward_on))
     app.add_handler(CommandHandler("antiforward_off", antiforward_off))
     app.add_handler(CommandHandler("setflood", setflood))
-
+    app.add_handler(CommandHandler("nobots_on", nobots_on))
+    app.add_handler(CommandHandler("nobots_off", nobots_off))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member))
+    # Lắng nghe thành viên mới (để đá bot)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member))
     # Warn utilities
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warn_info", warn_info))
@@ -836,6 +843,57 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
+        # --- Chặn bot khi có thành viên mới vào nhóm ---
+async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat:
+        return
+
+    db = SessionLocal()
+    try:
+        s = get_settings(db, chat.id)
+        if not hasattr(s, "nobots") or s.nobots is None:
+            s.nobots = True
+
+        if not s.nobots:
+            return
+
+        for member in (msg.new_chat_members or []):
+            if member.is_bot:
+                try:
+                    await context.bot.ban_chat_member(chat.id, member.id)
+                    await msg.reply_text(
+                        f"🤖 Đã xoá bot <b>{member.first_name}</b> (nobots bật).",
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as e:
+                    print("Kick bot failed:", e)
+    finally:
+        db.close()
+
+async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = True
+        db.commit()
+        await update.effective_message.reply_text("✅ Đã bật chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
+async def nobots_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = False
+        db.commit()
+        await update.effective_message.reply_text("❎ Đã tắt chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
