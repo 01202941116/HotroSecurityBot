@@ -17,7 +17,7 @@ LANG = {
         "trial_end": "❗ Thời gian dùng thử đã kết thúc.",
         "trial_started": "✅ Bắt đầu dùng thử 7 ngày. Chúc bạn trải nghiệm vui vẻ!",
 
-        # Khi người dùng đã có PRO (từ key), /trial sẽ trả lời thế này
+        # Khi người dùng đã có PRO (từ key), /trial sẽ trả lời như sau
         "pro_active": "✅ Bạn đang có gói PRO, còn {days} ngày.",
 
         # Redeem / Genkey
@@ -29,7 +29,7 @@ LANG = {
         "genkey_usage": "Dùng: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Đã tạo key PRO {days} ngày:\n{code}",
 
-        # Whitelist (PRO)
+        # Whitelist
         "wl_not_found": "❗ Không tìm thấy domain trong whitelist.",
         "wl_deleted": "🗑️ Đã xoá khỏi whitelist: {domain}",
         "wl_empty": "Danh sách trống.",
@@ -54,14 +54,15 @@ LANG = {
             "• /antilink_on | /antilink_off – Bật/tắt chặn link\n"
             "• /antimention_on | /antimention_off – Bật/tắt chặn tag @all / mention\n"
             "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
-            "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n\n"
+            "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n"
             "• /nobots_on | /nobots_off – Bật/tắt chặn bot mới vào nhóm\n"
+            "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n\n"
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
             "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
             "• /genkey &lt;days&gt; – (OWNER) Tạo key PRO\n"
-            "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist\n"
+            "• /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist (xoá / xem)\n"
             "• /warn – (Admin) Reply tin có link để cảnh báo/xoá link/chặn khi vi phạm 3 lần\n"
             "• /warn_info – Xem số cảnh cáo của 1 người (reply tin hoặc /warn_info &lt;user_id&gt;)\n"
             "• /warn_clear – Xóa toàn bộ cảnh cáo của 1 người (reply tin hoặc /warn_clear &lt;user_id&gt;)\n"
@@ -110,7 +111,7 @@ LANG = {
         "genkey_usage": "Usage: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Created a PRO key for {days} days:\n{code}",
 
-        # Whitelist (PRO)
+        # Whitelist
         "wl_not_found": "❗ Domain not found in whitelist.",
         "wl_deleted": "🗑️ Removed from whitelist: {domain}",
         "wl_empty": "Empty list.",
@@ -135,14 +136,15 @@ LANG = {
             "• /antilink_on | /antilink_off – Toggle link blocking\n"
             "• /antimention_on | /antimention_off – Toggle @ mention blocking\n"
             "• /antiforward_on | /antiforward_off – Toggle forwarded message blocking\n"
-            "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n\n"
+            "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n"
             "• /nobots_on | /nobots_off – Toggle blocking newly-added bots\n"
+            "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n\n"
             "💎 <b>PRO</b>\n"
             "• /pro – PRO guide & activation\n"
             "• /trial – 7-day free trial\n"
             "• /redeem &lt;key&gt; – Redeem PRO key\n"
             "• /genkey &lt;days&gt; – (OWNER) Generate PRO key\n"
-            "• /wl_add &lt;domain&gt; | /wl_del &lt;domain&gt; | /wl_list – Whitelist manager\n"
+            "• /wl_del &lt;domain&gt; | /wl_list – Whitelist manager (remove / list)\n"
             "• /warn – (Admin) Reply a message with link to warn/delete/auto-ban after 3 times\n"
             "• /warn_info – Show a member’s warning count (reply a message or /warn_info &lt;user_id&gt;)\n"
             "• /warn_clear – Clear all warnings of a member (reply a message or /warn_clear &lt;user_id&gt;)\n"
