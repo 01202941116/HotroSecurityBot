@@ -139,6 +139,13 @@ class Supporter(Base):
     user_id = Column(BigInteger, index=True, nullable=False)   # ✅ 64-bit
     note = Column(String(120), default="")
     __table_args__ = (UniqueConstraint('chat_id', 'user_id', name='uix_supporter_chat_user'),)
+    
+# Người đăng ký nhận thông báo cập nhật (DM)
+class UpdateSubscriber(Base):
+    __tablename__ = "update_subscribers"
+    user_id = Column(BigInteger, primary_key=True)   # Telegram user id (64-bit)
+    username = Column(String, default="")
+    added_at = Column(DateTime, default=now_utc)
 
 # ===== INIT / MIGRATION =====
 def init_db():
