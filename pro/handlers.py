@@ -53,8 +53,7 @@ def _has_active_pro(db: SessionLocal, user_id: int) -> bool:
 HELP_PRO_VI = (
     "<b>Gói PRO</b>\n"
     "• Dùng thử 7 ngày: /trial\n"
-    "• Nhập key: /redeem &lt;key&gt;\n"
-    "• Tạo key (OWNER): /genkey &lt;days&gt;\n"
+    "• Nhập key: /redeem &lt;key&gt;\n"    
     "• Whitelist: /wl_del &lt;domain&gt; | /wl_list (Lưu ý: /wl_add có trong gói FREE)\n"
     "• Quảng cáo tự động nhóm: /ad_on, /ad_off, /ad_set &lt;text&gt;, /ad_interval &lt;phút&gt;\n"
     "• Đổi ngôn ngữ: /lang vi hoặc /lang en\n"
