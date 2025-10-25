@@ -373,31 +373,20 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.close()
 
-# ====== WHITELIST (FREE: ONLY /wl_add) ======
-async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context):
+# ====== LỆNH WHITELIST DANH SÁCH ======
+async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hiển thị danh sách domain whitelist của nhóm hiện tại"""
+    chat = update.effective_chat
+    if not chat:
         return
-
-    m = update.effective_message
-    if not context.args:
-        return await m.reply_text("Cú pháp: /wl_add <domain>")
-
-    raw = context.args[0]
-    domain = to_host(raw)
-    if not domain:
-        return await m.reply_text("Domain không hợp lệ.")
-
     db = SessionLocal()
     try:
-        chat_id = update.effective_chat.id
-        ex = db.query(Whitelist).filter_by(chat_id=chat_id, domain=domain).one_or_none()
-        if ex:
-            return await m.reply_text(f"Domain đã có trong whitelist: {domain}")
-        db.add(Whitelist(chat_id=chat_id, domain=domain))
-        db.commit()
-
-        total = db.query(Whitelist).filter_by(chat_id=chat_id).count()
-        await m.reply_text(f"✅ Đã thêm whitelist: {domain}\nTổng whitelist của nhóm: {total}")
+        rows = db.query(Whitelist).filter_by(chat_id=chat.id).all()
+        if not rows:
+            return await update.effective_message.reply_text("📭 Danh sách whitelist trống.")
+        domains = [f"• <code>{to_host(r.domain)}</code>" for r in rows]
+        msg = "<b>🌐 Danh sách whitelist:</b>\n" + "\n".join(domains)
+        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
     finally:
         db.close()
 
