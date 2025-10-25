@@ -181,3 +181,11 @@ def get_support_enabled(db: SessionLocal, chat_id: int) -> bool:
 
 def list_supporters(db: SessionLocal, chat_id: int) -> list[int]:
     return [r.user_id for r in db.query(Supporter).filter_by(chat_id=chat_id).all()]
+    welcome_messages = {}
+
+def set_welcome_message(chat_id: int, text: str):
+    welcome_messages[chat_id] = text
+
+def get_welcome_message(chat_id: int) -> str:
+    return welcome_messages.get(chat_id)
+
