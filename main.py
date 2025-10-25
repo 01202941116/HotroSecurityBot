@@ -449,6 +449,167 @@ async def warn_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+# ====== FILTERS & TOGGLES (bổ sung) ======
+async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    if not context.args:
+        return await update.effective_message.reply_text(
+            "Cú pháp: <code>/filter_add từ_khoá</code>", parse_mode=ParseMode.HTML
+        )
+    pattern = " ".join(context.args).strip()
+    if not pattern:
+        return await update.effective_message.reply_text("Từ khoá rỗng.")
+    db = SessionLocal()
+    try:
+        f = Filter(chat_id=update.effective_chat.id, pattern=pattern)
+        db.add(f)
+        db.commit()
+        await update.effective_message.reply_text(
+            f"✅ Đã thêm filter #{f.id}: <code>{pattern}</code>", parse_mode=ParseMode.HTML
+        )
+    finally:
+        db.close()
+
+async def filter_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    db = SessionLocal()
+    try:
+        items = db.query(Filter).filter_by(chat_id=update.effective_chat.id).all()
+        if not items:
+            return await update.effective_message.reply_text("Danh sách filter trống.")
+        out = ["<b>Filters:</b>"] + [f"{i.id}. <code>{i.pattern}</code>" for i in items]
+        await update.effective_message.reply_text("\n".join(out), parse_mode=ParseMode.HTML)
+    finally:
+        db.close()
+
+async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    if not context.args:
+        return await update.effective_message.reply_text("Cú pháp: /filter_del <id>")
+    try:
+        fid = int(context.args[0])
+    except ValueError:
+        return await update.effective_message.reply_text("ID không hợp lệ.")
+    db = SessionLocal()
+    try:
+        it = db.query(Filter).filter_by(id=fid, chat_id=update.effective_chat.id).one_or_none()
+        if not it:
+            return await update.effective_message.reply_text("Không tìm thấy ID.")
+        db.delete(it)
+        db.commit()
+        await update.effective_message.reply_text(f"🗑️ Đã xoá filter #{fid}.")
+    finally:
+        db.close()
+
+async def _toggle(update: Update, field: str, val: bool, label: str):
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = Setting(chat_id=update.effective_chat.id)
+            db.add(s)
+        setattr(s, field, val)
+        db.commit()
+        await update.effective_message.reply_text(("✅ Bật " if val else "❎ Tắt ") + label + ".")
+    finally:
+        db.close()
+
+async def antilink_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antilink", True, "Anti-link")
+
+async def antilink_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antilink", False, "Anti-link")
+
+async def antimention_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antimention", True, "Anti-mention")
+
+async def antimention_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antimention", False, "Anti-mention")
+
+async def antiforward_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antiforward", True, "Anti-forward")
+
+async def antiforward_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    await _toggle(update, "antiforward", False, "Anti-forward")
+
+async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): return
+    if not context.args:
+        return await update.effective_message.reply_text("Cú pháp: /setflood <số tin>")
+    try:
+        n = max(2, int(context.args[0]))
+    except ValueError:
+        return await update.effective_message.reply_text("Giá trị không hợp lệ.")
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = Setting(chat_id=update.effective_chat.id)
+            db.add(s)
+        s.flood_limit = n
+        db.commit()
+        await update.effective_message.reply_text(f"✅ Flood limit = {n}")
+    finally:
+        db.close()
+
+async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = True
+        db.commit()
+        await update.effective_message.reply_text("✅ Đã bật chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
+async def nobots_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, update.effective_chat.id)
+        s.nobots = False
+        db.commit()
+        await update.effective_message.reply_text("❎ Đã tắt chặn bot khi có thành viên mới.")
+    finally:
+        db.close()
+
+async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat:
+        return
+    if not getattr(msg, "new_chat_members", None):
+        return
+    db = SessionLocal()
+    try:
+        s = get_settings(db, chat.id)
+        if not s.nobots:
+            return
+        for m in msg.new_chat_members:
+            if m.is_bot:
+                try:
+                    await context.bot.ban_chat_member(chat.id, m.id)
+                    await msg.reply_text(
+                        f"🤖 Đã xoá bot <b>{m.first_name}</b> (nobots đang bật).",
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as e:
+                    print("Kick bot failed:", e)
+    finally:
+        db.close()
+
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -539,6 +700,19 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
     finally:
         db.close()
+
+# ====== Chặn lệnh không hợp lệ ======
+async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    text = (msg.text or "").strip()
+    if not text.startswith("/"):
+        return
+    cmd = text.split()[0].split("@")[0].lower()
+    if cmd not in {c.lower() for c in ALLOWED_COMMANDS}:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
 # ====== Error log ======
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
