@@ -647,7 +647,23 @@ def main():
 
     # FREE: whitelist (ở file này chỉ /wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
-
+    # Liệt kê whitelist của group hiện tại
+async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Tuỳ bạn: chỉ admin mới xem hay ai cũng xem. Ở đây cho admin để đồng bộ với /wl_add
+    if not await _must_admin_in_group(update, context):
+        return
+    db = SessionLocal()
+    try:
+        items = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id).all()
+        if not items:
+            await update.effective_message.reply_text("Danh sách trống.")
+            return
+        lines = "\n".join(f"• {w.domain}" for w in items)
+        await update.effective_message.reply_text(lines)
+    finally:
+        db.close()
+    # đăng ký handler
+    app.add_handler(CommandHandler("wl_list", wl_list))
     # Filters & toggles (FREE, admin)
     app.add_handler(CommandHandler("filter_add", filter_add))
     app.add_handler(CommandHandler("filter_list", filter_list))
