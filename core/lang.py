@@ -1,5 +1,7 @@
 # core/lang.py
 
+# core/lang.py
+
 # ====== GỐC NGÔN NGỮ ======
 LANG = {
     "vi": {
@@ -16,21 +18,22 @@ LANG = {
         "trial_active": "✅ Bạn đang dùng thử, còn {days} ngày.",
         "trial_end": "❗ Thời gian dùng thử đã kết thúc.",
         "trial_started": "✅ Bắt đầu dùng thử 7 ngày. Chúc bạn trải nghiệm vui vẻ!",
-
         "pro_active": "✅ Bạn đang có gói PRO, còn {days} ngày.",
 
+        # Redeem / Genkey
         "redeem_usage": "Dùng: <code>/redeem &lt;key&gt;</code>",
         "redeem_invalid": "❗ Key không hợp lệ hoặc đã được sử dụng.",
         "redeem_ok": "✅ Đã kích hoạt PRO {days} ngày. Cảm ơn!",
-
         "genkey_denied": "❌ Lệnh này chỉ dành cho OWNER.",
         "genkey_usage": "Dùng: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Đã tạo key PRO {days} ngày:\n{code}",
 
+        # Whitelist
         "wl_not_found": "❗ Không tìm thấy domain trong whitelist.",
         "wl_deleted": "🗑️ Đã xoá khỏi whitelist: {domain}",
         "wl_empty": "Danh sách trống.",
 
+        # Quảng cáo
         "ad_updated": "✅ Đã cập nhật nội dung quảng cáo.",
         "ad_interval_set": "✅ Đã đặt chu kỳ gửi: {minutes} phút.",
         "ad_status_title": "Trạng thái Quảng cáo tự động",
@@ -39,6 +42,7 @@ LANG = {
         "ad_status_content": "Nội dung",
         "ad_status_last": "Lần gửi gần nhất",
 
+        # HELP
         "help_full": (
             "🤖 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
             "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
@@ -51,21 +55,21 @@ LANG = {
             "• /antiforward_on | /antiforward_off – Bật/tắt chặn tin chuyển tiếp\n"
             "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n"
             "• /nobots_on | /nobots_off – Bật/tắt chặn bot mới vào nhóm\n"
-            "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n\n"
+            "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n"
             "• /setwelcome &lt;câu chào&gt; – Đặt lời chào mừng thành viên mới\n\n"
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
-            "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"            
+            "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
             "• /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist (xoá / xem)\n"
             "• /warn – (Admin) Reply tin có link để cảnh báo/xoá link/chặn khi vi phạm 3 lần\n"
-            "• /warn_info – Xem số cảnh cáo của 1 người (reply tin hoặc /warn_info &lt;user_id&gt;)\n"
-            "• /warn_clear – Xóa toàn bộ cảnh cáo của 1 người (reply tin hoặc /warn_clear &lt;user_id&gt;)\n"
+            "• /warn_info – Xem số cảnh cáo của 1 người\n"
+            "• /warn_clear – Xóa toàn bộ cảnh cáo của 1 người\n"
             "• /warn_top – Xem top người bị cảnh cáo nhiều nhất\n"
             "• /support_on – Bật chế độ hỗ trợ (người hỗ trợ được gửi link)\n"
             "• /support_off – Tắt chế độ hỗ trợ\n"
-            "• /support_add (reply) – Thêm người hỗ trợ\n"
-            "• /support_del (reply) – Xoá người hỗ trợ\n"
+            "• /support_add – Thêm người hỗ trợ\n"
+            "• /support_del – Xoá người hỗ trợ\n"
             "• /support_list – Xem danh sách người hỗ trợ\n\n"
             "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
             "• /ad_on – Bật QC tự động\n"
@@ -77,7 +81,11 @@ LANG = {
             "• /lang vi — Tiếng Việt\n"
             "• /lang en — English\n"
         ),
-        
+
+        "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
+        "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
+        "welcome_default": "Chào mừng {name} đến với nhóm!"
+    },  # ←←← Đóng ngoặc của 'vi' TẠI ĐÂY !!!
 
     "en": {
         "start": "Hello {name} 👋\nThere are currently {count} users using this bot.",
@@ -91,13 +99,11 @@ LANG = {
         "trial_active": "✅ You are on trial, {days} days remaining.",
         "trial_end": "❗ Your trial period has expired.",
         "trial_started": "✅ Trial started for 7 days. Enjoy!",
-
         "pro_active": "✅ You have an active PRO plan, {days} days left.",
 
         "redeem_usage": "Usage: <code>/redeem &lt;key&gt;</code>",
         "redeem_invalid": "❗ Invalid key or already used.",
         "redeem_ok": "✅ PRO activated for {days} days. Thank you!",
-
         "genkey_denied": "❌ This command is for OWNER only.",
         "genkey_usage": "Usage: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Created a PRO key for {days} days:\n{code}",
@@ -126,21 +132,21 @@ LANG = {
             "• /antiforward_on | /antiforward_off – Toggle forwarded message blocking\n"
             "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n"
             "• /nobots_on | /nobots_off – Toggle blocking newly-added bots\n"
-            "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n\n"
+            "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n"
             "• /setwelcome &lt;message&gt; – Set the welcome message for new members\n\n"
             "💎 <b>PRO</b>\n"
             "• /pro – PRO guide & activation\n"
             "• /trial – 7-day free trial\n"
-            "• /redeem &lt;key&gt; – Redeem PRO key\n"            
+            "• /redeem &lt;key&gt; – Redeem PRO key\n"
             "• /wl_del &lt;domain&gt; | /wl_list – Whitelist manager (remove / list)\n"
             "• /warn – (Admin) Reply a message with link to warn/delete/auto-ban after 3 times\n"
-            "• /warn_info – Show a member’s warning count (reply a message or /warn_info &lt;user_id&gt;)\n"
-            "• /warn_clear – Clear all warnings of a member (reply a message or /warn_clear &lt;user_id&gt;)\n"
+            "• /warn_info – Show a member’s warning count\n"
+            "• /warn_clear – Clear all warnings of a member\n"
             "• /warn_top – Show top members with the most warnings\n"
-            "• /support_on – Enable Support Mode (supporters can send links)\n"
+            "• /support_on – Enable Support Mode\n"
             "• /support_off – Disable Support Mode\n"
-            "• /support_add (reply) – Add a supporter\n"
-            "• /support_del (reply) – Remove a supporter\n"
+            "• /support_add – Add a supporter\n"
+            "• /support_del – Remove a supporter\n"
             "• /support_list – Show supporters\n\n"
             "📢 <b>AUTO PROMOTION</b>\n"
             "• /ad_on – Enable auto promo\n"
@@ -152,7 +158,11 @@ LANG = {
             "• /lang vi — Vietnamese\n"
             "• /lang en — English\n"
         ),
-     
+
+        "setwelcome_usage": "📌 Usage: /setwelcome <message>. Use {name} to insert the new member’s name.",
+        "setwelcome_ok": "✅ Welcome message saved!",
+        "welcome_default": "Welcome {name} to the group!"
+    }
 }
 
 # ====== HÀM TRỢ GIÚP ======
