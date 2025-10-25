@@ -1,4 +1,3 @@
-# main.py
 import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
@@ -9,20 +8,15 @@ from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
+from telegram.ext import MessageHandler
+from telegram.ext import filters as tg_filters
+from core.models import set_welcome_message, get_welcome_message
 from telegram.constants import ParseMode
 from telegram.error import Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters, CallbackQueryHandler
 )
-
-from core.models import (
-    init_db, SessionLocal, Setting, Filter, Whitelist,
-    User, count_users, Warning, Blacklist,
-    list_supporters, get_support_enabled,
-    set_welcome_message, get_welcome_message,
-)
-
 # ====== CHO PHÉP NHỮNG LỆNH NÀO ======
 ALLOWED_COMMANDS = {
     "/start", "/help", "/lang", "/stats", "/status", "/uptime", "/ping",
@@ -39,6 +33,12 @@ ALLOWED_COMMANDS = {
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
     "/setwelcome",
 }
+# ====== LOCAL MODELS (gộp 1 lần) ======
+from core.models import (
+    init_db, SessionLocal, Setting, Filter, Whitelist,
+    User, count_users, Warning, Blacklist,
+    Supporter, SupportSetting, list_supporters, get_support_enabled
+)
 
 # ====== I18N ======
 from core.lang import t, LANG
@@ -372,21 +372,35 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     db.close()
-
-# ====== LỆNH WHITELIST DANH SÁCH ======
-async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Hiển thị danh sách domain whitelist của nhóm hiện tại"""
-    chat = update.effective_chat
-    if not chat:
+    
+# ====== WHITELIST (FREE: ONLY /wl_add) ======
+async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Chỉ cho admin trong group
+    if not await _must_admin_in_group(update, context):
         return
+
+    m = update.effective_message
+    if not context.args:
+        return await m.reply_text("Cú pháp: /wl_add <domain>")
+
+    raw = context.args[0]
+    domain = to_host(raw)
+    if not domain:
+        return await m.reply_text("Domain không hợp lệ.")
+
     db = SessionLocal()
     try:
-        rows = db.query(Whitelist).filter_by(chat_id=chat.id).all()
-        if not rows:
-            return await update.effective_message.reply_text("📭 Danh sách whitelist trống.")
-        domains = [f"• <code>{to_host(r.domain)}</code>" for r in rows]
-        msg = "<b>🌐 Danh sách whitelist:</b>\n" + "\n".join(domains)
-        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+        chat_id = update.effective_chat.id
+        ex = db.query(Whitelist).filter_by(chat_id=chat_id, domain=domain).one_or_none()
+        if ex:
+            return await m.reply_text(f"Domain đã có trong whitelist: {domain}")
+        db.add(Whitelist(chat_id=chat_id, domain=domain))
+        db.commit()
+
+        total = db.query(Whitelist).filter_by(chat_id=chat_id).count()
+        await m.reply_text(
+            f"✅ Đã thêm whitelist: {domain}\nTổng whitelist của nhóm: {total}"
+        )
     finally:
         db.close()
 
@@ -451,9 +465,11 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (msg.text or msg.caption or "")
     low = text.lower()
 
-    # 1) Chặn lệnh giả
+    # 1) Chặn lệnh giả (bắt đầu bằng "/") nếu KHÔNG thuộc danh sách cho phép
     if text.startswith("/"):
         cmd = text.split()[0].lower()
+
+        # Cho admin/creator được phép gõ mọi lệnh (không bị xoá)
         try:
             member = await context.bot.get_chat_member(chat.id, user.id)
             is_admin = member.status in ("administrator", "creator")
@@ -465,13 +481,16 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await msg.delete()
             except Exception:
                 pass
-            return
+            return  # dừng luôn, không xử lý tiếp
+
+        # Nếu là lệnh hợp lệ thì để handler của CommandHandler xử lý, guard không đụng vào
         return
 
     # 2) Lọc nội dung thường
     chat_id = chat.id
     db = SessionLocal()
     try:
+        # Dùng get_settings với phiên DB đã mở (tránh mở thêm phiên → đỡ lỗi pool)
         s = get_settings(db, chat_id)
 
         # 2.1. Từ khóa filter
@@ -491,11 +510,10 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # 2.3. Chặn link (tôn trọng whitelist và supporter)
+        # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
         if s.antilink and LINK_RE.search(text):
-            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            msg_hosts = extract_hosts(text)
-            is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
+            wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            is_whitelisted = any(d and d in low for d in wl)
 
             allow_support = False
             try:
@@ -512,7 +530,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.4. Chặn mention
+        # 2.4. Chặn mention (loại URL ra trước khi kiểm)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
             if "@" in text_no_urls:
@@ -573,15 +591,12 @@ async def on_startup(app: Application):
             )
         except Exception as e:
             print("⚠️ Notify owner failed:", e)
-
 # ✅ Lệnh để chủ nhóm cài đặt lời chào
 async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
     if not context.args:
-        return await update.effective_message.reply_text(
-            "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên."
-        )
+        return await update.effective_message.reply_text("📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.")
     content = " ".join(context.args).strip()
     set_welcome_message(update.effective_chat.id, content)
     await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
@@ -594,7 +609,6 @@ async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for user in update.message.new_chat_members:
         name = user.mention_html() if user else "bạn mới"
         await update.effective_message.reply_html(welcome_text.replace("{name}", name))
-
 # ====== Main ======
 def main():
     if not BOT_TOKEN:
@@ -608,11 +622,12 @@ def main():
     except Exception as e:
         print("Lỗi keep_alive:", e)
 
+    # Build app một lần, dùng post_init chuẩn
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = on_startup
     app.add_error_handler(on_error)
 
-    # ==== Commands ====
+    # ==== Commands (đăng ký MỘT lần) ====
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("lang", lang_cmd))
@@ -623,10 +638,9 @@ def main():
     app.add_handler(CommandHandler("setwelcome", setwelcome_cmd))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_member))
 
-    # FREE: whitelist
+
+    # FREE: whitelist (ở file này chỉ /wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
-    app.add_handler(CommandHandler("wl_list", wl_list))
-    ALLOWED_COMMANDS.add("/wl_list")
 
     # Filters & toggles (FREE, admin)
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -641,7 +655,6 @@ def main():
     app.add_handler(CommandHandler("setflood", setflood))
     app.add_handler(CommandHandler("nobots_on", nobots_on))
     app.add_handler(CommandHandler("nobots_off", nobots_off))
-
     # Warn utilities
     app.add_handler(CommandHandler("warn", warn_cmd))
     app.add_handler(CommandHandler("warn_info", warn_info))
@@ -654,20 +667,20 @@ def main():
 
     # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
-
     # Chặn mọi lệnh không được cho phép
     app.add_handler(MessageHandler(filters.COMMAND, block_unknown_commands))
 
     # Guard: lọc tin nhắn thường
     app.add_handler(MessageHandler(~filters.StatusUpdate.ALL & ~filters.COMMAND, guard))
-
-    # Lắng nghe thành viên mới để đá bot khi cần
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member))
-
+    # Lắng nghe thành viên mới vào nhóm để đá bot khi cần
+    app.add_handler(MessageHandler(
+    filters.StatusUpdate.NEW_CHAT_MEMBERS, 
+    on_new_member
+))
     print("✅ Bot started, polling Telegram updates...")
     app.run_polling(drop_pending_updates=True, timeout=60)
 
-# ====== FILTERS & TOGGLES (phần dưới giữ nguyên như bạn đang có) ======
+# ====== FILTERS & TOGGLES ======
 async def filter_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
@@ -778,9 +791,8 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"✅ Flood limit = {n}")
     finally:
         db.close()
-
 async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context):
+    if not await _must_admin_in_group(update, context): 
         return
     db = SessionLocal()
     try:
@@ -792,7 +804,7 @@ async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def nobots_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context):
+    if not await _must_admin_in_group(update, context): 
         return
     db = SessionLocal()
     try:
@@ -828,20 +840,20 @@ async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     print("Kick bot failed:", e)
     finally:
         db.close()
-
+        
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     text = (msg.text or "").strip()
     if not text.startswith("/"):
         return
+    # lấy phần lệnh, bỏ @BotName và tham số
     cmd = text.split()[0].split("@")[0].lower()
     if cmd not in {c.lower() for c in ALLOWED_COMMANDS}:
         try:
             await msg.delete()
         except Exception:
             pass
-
-# ====== Entry point ======
+# ====== Entry point (đặt CUỐI FILE) ======
 if __name__ == "__main__":
     main()
