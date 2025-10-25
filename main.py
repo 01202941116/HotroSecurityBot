@@ -625,6 +625,8 @@ def main():
 
     # FREE: whitelist
     app.add_handler(CommandHandler("wl_add", wl_add))
+    app.add_handler(CommandHandler("wl_list", wl_list))
+    ALLOWED_COMMANDS.add("/wl_list")
 
     # Filters & toggles (FREE, admin)
     app.add_handler(CommandHandler("filter_add", filter_add))
