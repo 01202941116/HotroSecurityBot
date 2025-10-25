@@ -1,7 +1,5 @@
 # core/lang.py
 
-# core/lang.py
-
 # ====== GỐC NGÔN NGỮ ======
 LANG = {
     "vi": {
@@ -56,21 +54,22 @@ LANG = {
             "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n"
             "• /nobots_on | /nobots_off – Bật/tắt chặn bot mới vào nhóm\n"
             "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n"
-            "• /setwelcome &lt;câu chào&gt; – Đặt lời chào mừng thành viên mới\n\n"
+            "• /setwelcome &lt;câu chào&gt; – Cài lời chào cho nhóm khi có thành viên mới\n"
+            "   ⤷ Ví dụ: <code>/setwelcome Chào mừng {name} đến với nhóm ❤️</code>\n\n"
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
             "• /redeem &lt;key&gt; – Kích hoạt key PRO\n"
             "• /wl_del &lt;domain&gt; | /wl_list – Quản lý whitelist (xoá / xem)\n"
-            "• /warn – (Admin) Reply tin có link để cảnh báo/xoá link/chặn khi vi phạm 3 lần\n"
+            "• /warn – (Admin) Cảnh báo / xoá / chặn khi vi phạm 3 lần\n"
             "• /warn_info – Xem số cảnh cáo của 1 người\n"
-            "• /warn_clear – Xóa toàn bộ cảnh cáo của 1 người\n"
-            "• /warn_top – Xem top người bị cảnh cáo nhiều nhất\n"
+            "• /warn_clear – Xoá toàn bộ cảnh cáo của 1 người\n"
+            "• /warn_top – Xem top cảnh cáo\n"
             "• /support_on – Bật chế độ hỗ trợ (người hỗ trợ được gửi link)\n"
             "• /support_off – Tắt chế độ hỗ trợ\n"
             "• /support_add – Thêm người hỗ trợ\n"
             "• /support_del – Xoá người hỗ trợ\n"
-            "• /support_list – Xem danh sách người hỗ trợ\n\n"
+            "• /support_list – Danh sách người hỗ trợ\n\n"
             "📢 <b>QUẢNG CÁO TỰ ĐỘNG</b>\n"
             "• /ad_on – Bật QC tự động\n"
             "• /ad_off – Tắt QC tự động\n"
@@ -85,7 +84,7 @@ LANG = {
         "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
         "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
         "welcome_default": "Chào mừng {name} đến với nhóm!"
-    },  # ←←← Đóng ngoặc của 'vi' TẠI ĐÂY !!!
+    },
 
     "en": {
         "start": "Hello {name} 👋\nThere are currently {count} users using this bot.",
@@ -133,16 +132,17 @@ LANG = {
             "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n"
             "• /nobots_on | /nobots_off – Toggle blocking newly-added bots\n"
             "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n"
-            "• /setwelcome &lt;message&gt; – Set the welcome message for new members\n\n"
+            "• /setwelcome &lt;message&gt; – Set a custom welcome message for new members\n"
+            "   ⤷ Example: <code>/setwelcome Welcome {name} to our group 🎉</code>\n\n"
             "💎 <b>PRO</b>\n"
             "• /pro – PRO guide & activation\n"
             "• /trial – 7-day free trial\n"
             "• /redeem &lt;key&gt; – Redeem PRO key\n"
-            "• /wl_del &lt;domain&gt; | /wl_list – Whitelist manager (remove / list)\n"
-            "• /warn – (Admin) Reply a message with link to warn/delete/auto-ban after 3 times\n"
-            "• /warn_info – Show a member’s warning count\n"
-            "• /warn_clear – Clear all warnings of a member\n"
-            "• /warn_top – Show top members with the most warnings\n"
+            "• /wl_del &lt;domain&gt; | /wl_list – Manage whitelist (remove / list)\n"
+            "• /warn – (Admin) Warn or auto-ban after 3 violations\n"
+            "• /warn_info – Check warning count of a member\n"
+            "• /warn_clear – Clear all warnings\n"
+            "• /warn_top – Show top warned members\n"
             "• /support_on – Enable Support Mode\n"
             "• /support_off – Disable Support Mode\n"
             "• /support_add – Add a supporter\n"
