@@ -8,6 +8,9 @@ from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
+from telegram.ext import MessageHandler
+from telegram.ext import filters as tg_filters
+from core.models import set_welcome_message, get_welcome_message
 from telegram.constants import ParseMode
 from telegram.error import Conflict
 from telegram.ext import (
@@ -587,7 +590,24 @@ async def on_startup(app: Application):
             )
         except Exception as e:
             print("⚠️ Notify owner failed:", e)
+# ✅ Lệnh để chủ nhóm cài đặt lời chào
+async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    if not context.args:
+        return await update.effective_message.reply_text("📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.")
+    content = " ".join(context.args).strip()
+    set_welcome_message(update.effective_chat.id, content)
+    await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
 
+# 👋 Gửi lời chào khi có thành viên mới
+async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    welcome_text = get_welcome_message(update.effective_chat.id)
+    if not welcome_text:
+        return
+    for user in update.message.new_chat_members:
+        name = user.mention_html() if user else "bạn mới"
+        await update.effective_message.reply_html(welcome_text.replace("{name}", name))
 # ====== Main ======
 def main():
     if not BOT_TOKEN:
@@ -614,7 +634,9 @@ def main():
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("uptime", uptime_cmd))
     app.add_handler(CommandHandler("ping", ping_cmd))
-    
+    app.add_handler(CommandHandler("setwelcome", setwelcome_cmd))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_member))
+
 
     # FREE: whitelist (ở file này chỉ /wl_add)
     app.add_handler(CommandHandler("wl_add", wl_add))
