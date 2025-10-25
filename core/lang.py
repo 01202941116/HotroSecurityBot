@@ -52,6 +52,7 @@ LANG = {
             "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n"
             "• /nobots_on | /nobots_off – Bật/tắt chặn bot mới vào nhóm\n"
             "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n\n"
+            "• /setwelcome &lt;câu chào&gt; – Đặt lời chào mừng thành viên mới\n\n"
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
@@ -76,10 +77,7 @@ LANG = {
             "• /lang vi — Tiếng Việt\n"
             "• /lang en — English\n"
         ),
-        "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
-        "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
-        "welcome_default": "Chào mừng {name} đến với nhóm!",
-    },
+        
 
     "en": {
         "start": "Hello {name} 👋\nThere are currently {count} users using this bot.",
@@ -129,6 +127,7 @@ LANG = {
             "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n"
             "• /nobots_on | /nobots_off – Toggle blocking newly-added bots\n"
             "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n\n"
+            "• /setwelcome &lt;message&gt; – Set the welcome message for new members\n\n"
             "💎 <b>PRO</b>\n"
             "• /pro – PRO guide & activation\n"
             "• /trial – 7-day free trial\n"
@@ -153,10 +152,7 @@ LANG = {
             "• /lang vi — Vietnamese\n"
             "• /lang en — English\n"
         ),
-        "setwelcome_usage": "📌 Usage: /setwelcome <message>. Use {name} to insert the new member’s name.",
-        "setwelcome_ok": "✅ Welcome message saved!",
-        "welcome_default": "Welcome {name} to the group!",
-    }
+     
 }
 
 # ====== HÀM TRỢ GIÚP ======
