@@ -510,31 +510,30 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-                # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
-        if s.antilink and LINK_RE.search(text):
-            # Lấy danh sách domain đã whitelist, chuẩn hoá về host
-            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            # Tách tất cả host có trong tin nhắn
-            msg_hosts = extract_hosts(text)
-            # Cho phép nếu BẤT KỲ host trong tin nhắn khớp whitelist (host đầy đủ hoặc subdomain)
-            is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
+       # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
+     if s.antilink and LINK_RE.search(text):
+       # Lấy danh sách domain whitelist (đã chuẩn hoá host)
+    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+       # Tách tất cả host xuất hiện trong tin nhắn (kể cả có http/https, có path, hoặc chỉ domain)
+    msg_hosts = extract_hosts(text)
+       # Hợp lệ nếu BẤT KỲ host trong tin nhắn khớp whitelist (đúng domain hoặc subdomain)
+    is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
 
-            # Cho phép người hỗ trợ (nếu bật support mode)
-            allow_support = False
-            try:
-                if get_support_enabled(db, chat_id):
-                    sup_ids = list_supporters(db, chat_id)
-                    allow_support = user.id in sup_ids
-            except Exception:
-                allow_support = False
+       # Cho phép nếu user là supporter khi support mode bật
+    allow_support = False
+    try:
+        if get_support_enabled(db, chat_id):
+            sup_ids = list_supporters(db, chat_id)
+            allow_support = user.id in sup_ids
+    except Exception:
+        allow_support = False
 
-            # Nếu KHÔNG thuộc whitelist và KHÔNG phải supporter -> xoá
-            if not is_whitelisted and not allow_support:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                return
+    if not is_whitelisted and not allow_support:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
         # 2.4. Chặn mention (loại URL ra trước khi kiểm)
         if s.antimention:
