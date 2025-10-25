@@ -31,6 +31,7 @@ ALLOWED_COMMANDS = {
     "/trial", "/redeem", "/genkey",
     "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
+    "/setwelcome",
 }
 # ====== LOCAL MODELS (gộp 1 lần) ======
 from core.models import (
