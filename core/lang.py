@@ -17,10 +17,8 @@ LANG = {
         "trial_end": "❗ Thời gian dùng thử đã kết thúc.",
         "trial_started": "✅ Bắt đầu dùng thử 7 ngày. Chúc bạn trải nghiệm vui vẻ!",
 
-        # Khi người dùng đã có PRO (từ key), /trial sẽ trả lời như sau
         "pro_active": "✅ Bạn đang có gói PRO, còn {days} ngày.",
 
-        # Redeem / Genkey
         "redeem_usage": "Dùng: <code>/redeem &lt;key&gt;</code>",
         "redeem_invalid": "❗ Key không hợp lệ hoặc đã được sử dụng.",
         "redeem_ok": "✅ Đã kích hoạt PRO {days} ngày. Cảm ơn!",
@@ -29,12 +27,10 @@ LANG = {
         "genkey_usage": "Dùng: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Đã tạo key PRO {days} ngày:\n{code}",
 
-        # Whitelist
         "wl_not_found": "❗ Không tìm thấy domain trong whitelist.",
         "wl_deleted": "🗑️ Đã xoá khỏi whitelist: {domain}",
         "wl_empty": "Danh sách trống.",
 
-        # Quảng cáo tự động (PRO)
         "ad_updated": "✅ Đã cập nhật nội dung quảng cáo.",
         "ad_interval_set": "✅ Đã đặt chu kỳ gửi: {minutes} phút.",
         "ad_status_title": "Trạng thái Quảng cáo tự động",
@@ -43,7 +39,6 @@ LANG = {
         "ad_status_content": "Nội dung",
         "ad_status_last": "Lần gửi gần nhất",
 
-        # /help
         "help_full": (
             "🤖 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
             "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
@@ -57,9 +52,6 @@ LANG = {
             "• /setflood &lt;n&gt; – Giới hạn spam tin nhắn (mặc định 3)\n"
             "• /nobots_on | /nobots_off – Bật/tắt chặn bot mới vào nhóm\n"
             "• /wl_add &lt;domain&gt; – Thêm domain vào whitelist (FREE)\n\n"
-            "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
-            "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
-            "welcome_default": "Chào mừng {name} đến với nhóm!",
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
@@ -84,15 +76,16 @@ LANG = {
             "• /lang vi — Tiếng Việt\n"
             "• /lang en — English\n"
         ),
+        "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
+        "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
+        "welcome_default": "Chào mừng {name} đến với nhóm!",
     },
 
     "en": {
-        # Common
         "start": "Hello {name} 👋\nThere are currently {count} users using this bot.",
         "lang_switched": "✅ Switched language to: EN",
         "lang_usage": "Usage: /lang vi or /lang en",
 
-        # PRO / Trial / Redeem
         "pro_on": "✅ Auto-promotion enabled for this group.",
         "pro_off": "⛔️ Auto-promotion disabled.",
         "need_pro": "❗ This feature is available for PRO/TRIAL users only.",
@@ -101,10 +94,8 @@ LANG = {
         "trial_end": "❗ Your trial period has expired.",
         "trial_started": "✅ Trial started for 7 days. Enjoy!",
 
-        # /trial when user has paid PRO
         "pro_active": "✅ You have an active PRO plan, {days} days left.",
 
-        # Redeem / Genkey
         "redeem_usage": "Usage: <code>/redeem &lt;key&gt;</code>",
         "redeem_invalid": "❗ Invalid key or already used.",
         "redeem_ok": "✅ PRO activated for {days} days. Thank you!",
@@ -113,12 +104,10 @@ LANG = {
         "genkey_usage": "Usage: <code>/genkey &lt;days&gt;</code>",
         "genkey_created": "✅ Created a PRO key for {days} days:\n{code}",
 
-        # Whitelist
         "wl_not_found": "❗ Domain not found in whitelist.",
         "wl_deleted": "🗑️ Removed from whitelist: {domain}",
         "wl_empty": "Empty list.",
 
-        # Auto Promotion (PRO)
         "ad_updated": "✅ Promo content updated.",
         "ad_interval_set": "✅ Posting interval set to {minutes} minutes.",
         "ad_status_title": "Auto Promotion Status",
@@ -127,7 +116,6 @@ LANG = {
         "ad_status_content": "Content",
         "ad_status_last": "Last sent",
 
-        # /help
         "help_full": (
             "🤖 <b>HotroSecurityBot – Group Security Assistant</b>\n"
             "Auto filter spam, block links, warn violators, and schedule promo posts.\n\n"
@@ -141,10 +129,6 @@ LANG = {
             "• /setflood &lt;n&gt; – Anti-flood limit (default 3)\n"
             "• /nobots_on | /nobots_off – Toggle blocking newly-added bots\n"
             "• /wl_add &lt;domain&gt; – Add a domain to whitelist (FREE)\n\n"
-            "setwelcome_usage": "📌 Usage: /setwelcome <message>. Use {name} to insert the new member’s name.",
-            "setwelcome_ok": "✅ Welcome message saved!",
-            "welcome_default": "Welcome {name} to the group!",
-
             "💎 <b>PRO</b>\n"
             "• /pro – PRO guide & activation\n"
             "• /trial – 7-day free trial\n"
@@ -169,6 +153,9 @@ LANG = {
             "• /lang vi — Vietnamese\n"
             "• /lang en — English\n"
         ),
+        "setwelcome_usage": "📌 Usage: /setwelcome <message>. Use {name} to insert the new member’s name.",
+        "setwelcome_ok": "✅ Welcome message saved!",
+        "welcome_default": "Welcome {name} to the group!",
     }
 }
 
