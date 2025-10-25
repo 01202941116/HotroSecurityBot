@@ -510,11 +510,16 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
+                # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
         if s.antilink and LINK_RE.search(text):
-            wl = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            is_whitelisted = any(d and d in low for d in wl)
+            # Lấy danh sách domain đã whitelist, chuẩn hoá về host
+            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            # Tách tất cả host có trong tin nhắn
+            msg_hosts = extract_hosts(text)
+            # Cho phép nếu BẤT KỲ host trong tin nhắn khớp whitelist (host đầy đủ hoặc subdomain)
+            is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
 
+            # Cho phép người hỗ trợ (nếu bật support mode)
             allow_support = False
             try:
                 if get_support_enabled(db, chat_id):
@@ -523,6 +528,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 allow_support = False
 
+            # Nếu KHÔNG thuộc whitelist và KHÔNG phải supporter -> xoá
             if not is_whitelisted and not allow_support:
                 try:
                     await msg.delete()
