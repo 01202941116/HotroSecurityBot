@@ -20,7 +20,7 @@ from telegram.ext import (
 # ====== CHO PHÉP NHỮNG LỆNH NÀO ======
 ALLOWED_COMMANDS = {
     "/start", "/help", "/lang", "/stats", "/status", "/uptime", "/ping",
-    "/wl_add",
+    "/wl_add", "/wl_list",
     "/filter_add", "/filter_list", "/filter_del",
     "/antilink_on", "/antilink_off",
     "/antimention_on", "/antimention_off",
@@ -68,70 +68,50 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
 # ====== STATE / REGEX ======
 FLOOD = {}
+
+# Nếu bạn đã có thì giữ lại; nếu khác thì thay bằng bản này
 LINK_RE = re.compile(
-    r"(https?://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co)(/[^\s]*)?)",
+    r"(https?://|www\.|t\.me/|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co|biz|me|app|site|top|store|ru|cn|uk|us)(/[^\s]*)?)",
     re.IGNORECASE
 )
+
 def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
-
-# ====== TZ-SAFE HELPERS ======
-def utcnow():
-    return datetime.now(timezone.utc)
 
 def to_host(domain_or_url: str) -> str:
     s = (domain_or_url or "").strip().lower()
     if not s:
         return ""
-    s = re.sub(r"^https?://", "", s)
-    s = s.split("/")[0].split("?")[0].strip()
+    s = re.sub(r"^https?://", "", s)        # bỏ protocol
+    s = s.split("/")[0].split("?")[0].strip()  # bỏ path, query
     if s.startswith("www."):
         s = s[4:]
     return s
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
-DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})(?:/[^\s]*)?\b", re.IGNORECASE)
+DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
 
 def extract_hosts(text: str) -> list[str]:
-    """
-    Trả về danh sách host đã chuẩn hoá từ mọi URL/domain trong text.
-    Hỗ trợ:
-      - https://abc.com
-      - abc.com/xyz
-      - sub.abc.com?x=1
-    """
     text = text or ""
-    seen = set()
-    hosts: list[str] = []
-
-    # URL đầy đủ (có http/https)
+    hosts = []
     for m in URL_RE.findall(text):
-        h = to_host(m)
-        if h and h not in seen:
-            seen.add(h)
-            hosts.append(h)
-
-    # domain trần (có thể kèm path)
+        hosts.append(to_host(m))
     for m in DOMAIN_RE.findall(text):
-        h = to_host(m)
+        hosts.append(to_host(m))
+    out, seen = [], set()
+    for h in hosts:
         if h and h not in seen:
+            out.append(h)
             seen.add(h)
-            hosts.append(h)
-
-    return hosts
+    return out
 
 def host_allowed(host: str, allow_list: list[str]) -> bool:
-    """
-    True nếu host == domain whitelist hoặc là subdomain của domain whitelist.
-    Ví dụ:
-        host 'disk.yandex.com' khớp 'yandex.com' hoặc 'disk.yandex.com'
-        host 'sub.oklink.cfd'   khớp 'oklink.cfd'
-    """
     host = to_host(host)
     for d in allow_list:
         d = to_host(d)
         if not d:
             continue
+        # cho phép đúng domain hoặc subdomain
         if host == d or host.endswith("." + d):
             return True
     return False
@@ -533,16 +513,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
          # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
         if s.antilink and LINK_RE.search(text):
-            # Lấy whitelist theo nhóm (chuẩn hoá host)
+            # Lấy whitelist đã chuẩn hoá host
             wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-
-            # Bóc tách mọi host xuất hiện trong tin nhắn
+            # Tách toàn bộ host xuất hiện trong tin
             msg_hosts = extract_hosts(text)
-
-            # Nếu BẤT KỲ host nào thuộc whitelist -> cho qua
+            # Hợp lệ nếu BẤT KỲ host trong tin nhắn khớp whitelist (domain hoặc subdomain)
             is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
 
-            # Cho phép nếu user là supporter khi support mode bật
+            # Cho phép nếu user là supporter (khi support mode bật)
             allow_support = False
             try:
                 if get_support_enabled(db, chat_id):
