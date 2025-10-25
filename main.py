@@ -94,7 +94,7 @@ DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})(?:/[^\s]*)?\b", re
 
 def extract_hosts(text: str) -> list[str]:
     """
-    Trả về danh sách host đã chuẩn hoá từ mọi URL/domain có mặt trong text.
+    Trả về danh sách host đã chuẩn hoá từ mọi URL/domain trong text.
     Hỗ trợ:
       - https://abc.com
       - abc.com/xyz
@@ -104,7 +104,7 @@ def extract_hosts(text: str) -> list[str]:
     seen = set()
     hosts: list[str] = []
 
-    # URL đầy đủ
+    # URL đầy đủ (có http/https)
     for m in URL_RE.findall(text):
         h = to_host(m)
         if h and h not in seen:
@@ -122,11 +122,10 @@ def extract_hosts(text: str) -> list[str]:
 
 def host_allowed(host: str, allow_list: list[str]) -> bool:
     """
-    Cho phép nếu host == domain whitelist hoặc là subdomain của domain whitelist.
+    True nếu host == domain whitelist hoặc là subdomain của domain whitelist.
     Ví dụ:
-        host = 'disk.yandex.com'
-        allow = ['yandex.com', 'disk.yandex.com']  -> True
-        host = 'sub.oklink.cfd' allow = ['oklink.cfd'] -> True
+        host 'disk.yandex.com' khớp 'yandex.com' hoặc 'disk.yandex.com'
+        host 'sub.oklink.cfd'   khớp 'oklink.cfd'
     """
     host = to_host(host)
     for d in allow_list:
@@ -532,9 +531,9 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
+         # 2.3. Chặn link (trừ whitelist hoặc supporter được phép)
         if s.antilink and LINK_RE.search(text):
-            # Lấy whitelist theo nhóm (đã chuẩn hoá host)
+            # Lấy whitelist theo nhóm (chuẩn hoá host)
             wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
 
             # Bóc tách mọi host xuất hiện trong tin nhắn
