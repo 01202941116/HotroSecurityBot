@@ -2,8 +2,9 @@ import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re
-from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
+from datetime import datetime, timezone, timedelta
+
 from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -67,60 +68,45 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
-# ====== STATE / REGEX ======
+# ====== STATE ======
 FLOOD = {}
 
 # ---------------- URL/DOMAIN HELPERS (patched) ----------------
-# Dùng để quyết định có xử lý anti-link không
 LINK_RE = re.compile(
     r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co|biz|me|app|site|top|store|ru|cn|uk|us)(/[^\s<>()]+)?)",
     re.IGNORECASE
 )
-
-# Chỉ dùng để loại URL trước khi dò '@'
 URL_RE = re.compile(r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+)", re.IGNORECASE)
-
-TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")  # dấu câu thường dính cuối URL
+TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")
 
 def to_host(domain_or_url: str) -> str:
-    """Chuẩn hoá về host: bỏ protocol, www, path, query, fragment, dấu câu cuối."""
     s = (domain_or_url or "").strip().lower()
     if not s:
         return ""
     s = TRAILING_PUNCT_RE.sub("", s)
-
-    # Nếu là URL đầy đủ -> dùng urlsplit cho chắc
+    host = ""
     if "://" in s:
         try:
             host = urlsplit(s).hostname or ""
         except Exception:
             host = ""
     else:
-        # domain trần hoặc www.domain...
         host = s.split("/")[0].split("?")[0].split("#")[0].strip()
-
     if host.startswith("www."):
         host = host[4:]
     return host
 
 def extract_hosts(text: str) -> list[str]:
-    """Trích tất cả host có thể có trong message (URL đầy đủ & domain trần)"""
     text = (text or "").strip()
     hosts = []
-
-    # 1) tách từ URL đầy đủ (http/https/www/t.me)
-    for m in URL_RE.findall(text):
-        h = to_host(m)
+    for u in URL_RE.findall(text):
+        h = to_host(u)
         if h:
             hosts.append(h)
-
-    # 2) tách domain trần (ví dụ: disk.yandex.com)
     for m in re.findall(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", text, flags=re.IGNORECASE):
         h = to_host(m)
         if h:
             hosts.append(h)
-
-    # unique, giữ nguyên thứ tự
     out, seen = [], set()
     for h in hosts:
         if h not in seen:
@@ -128,22 +114,19 @@ def extract_hosts(text: str) -> list[str]:
     return out
 
 def host_allowed(host: str, allow_list: list[str]) -> bool:
-    """True nếu host khớp đúng domain whitelist hoặc là subdomain của nó"""
     h = to_host(host)
     if not h:
         return False
     for d in allow_list:
         dd = to_host(d)
-        if not dd:
-            continue
-        if h == dd or h.endswith("." + dd):
+        if dd and (h == dd or h.endswith("." + dd)):
             return True
     return False
 
 def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
-# --------------------------------------------------------------
-    
+# ------------------------------------------------------------
+
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
     from pro.handlers import register_handlers
@@ -220,7 +203,7 @@ async def _must_admin_in_group(update: Update, context: ContextTypes.DEFAULT_TYP
         return False
 
 # ====== Chọn ngôn ngữ ======
-USER_LANG = {}  # {user_id: "vi"|"en"}
+USER_LANG = {}
 
 async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -327,7 +310,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
 
-    # Whitelist check (host + subdomain)
     wl_hosts = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
     msg_hosts = extract_hosts(text)
     if any(host_allowed(h, wl_hosts) for h in msg_hosts):
@@ -390,16 +372,13 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
-
     m = update.effective_message
     if not context.args:
         return await m.reply_text("Cú pháp: /wl_add <domain>")
-
     raw = context.args[0]
     domain = to_host(raw)
     if not domain:
         return await m.reply_text("Domain không hợp lệ.")
-
     db = SessionLocal()
     try:
         chat_id = update.effective_chat.id
@@ -408,7 +387,6 @@ async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await m.reply_text(f"Domain đã có trong whitelist: {domain}")
         db.add(Whitelist(chat_id=chat_id, domain=domain))
         db.commit()
-
         total = db.query(Whitelist).filter_by(chat_id=chat_id).count()
         await m.reply_text(f"✅ Đã thêm whitelist: {domain}\nTổng whitelist của nhóm: {total}")
     finally:
@@ -516,7 +494,7 @@ async def filter_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
     if not context.args:
-        return await update.effective_message.reply_text("Cú pháp: /filter_del <id>")
+            return await update.effective_message.reply_text("Cú pháp: /filter_del <id>")
     try:
         fid = int(context.args[0])
     except ValueError:
@@ -649,7 +627,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (msg.text or msg.caption or "")
     low = text.lower()
 
-    # 1) Chặn lệnh giả
+    # 1) chặn lệnh giả
     if text.startswith("/"):
         cmd = text.split()[0].lower()
         try:
@@ -664,16 +642,15 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
-        # để CommandHandler xử lý tiếp
         return
 
-    # 2) Lọc nội dung thường
+    # 2) lọc nội dung thường
     chat_id = chat.id
     db = SessionLocal()
     try:
         s = get_settings(db, chat_id)
 
-        # 2.1. Từ khóa filter
+        # 2.1 filter từ khoá
         for it in db.query(Filter).filter_by(chat_id=chat_id).all():
             if it.pattern and it.pattern.lower() in low:
                 try:
@@ -682,7 +659,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.2. Chặn tin nhắn forward
+        # 2.2 chặn forward
         if s.antiforward and getattr(msg, "forward_origin", None):
             try:
                 await msg.delete()
@@ -690,33 +667,31 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # 2.3. Chặn link (trừ whitelist hoặc supporter)
+        # 2.3 chặn link (trừ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
-    wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-    msg_hosts = extract_hosts(text)
+            wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            msg_hosts = extract_hosts(text)
 
-    # nếu bất kỳ host trong message thuộc whitelist -> BỎ QUA (không xoá)
-    if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-        return
+            # nếu bất kỳ host trong message thuộc whitelist -> bỏ qua
+            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
+                return
 
-    # supporter (nếu bật support mode) thì cũng BỎ QUA
-    allow_support = False
-    try:
-        if get_support_enabled(db, chat_id):
-            sup_ids = list_supporters(db, chat_id)
-            allow_support = user.id in sup_ids
-    except Exception:
-        allow_support = False
+            allow_support = False
+            try:
+                if get_support_enabled(db, chat_id):
+                    sup_ids = list_supporters(db, chat_id)
+                    allow_support = user.id in sup_ids
+            except Exception:
+                allow_support = False
 
-    if not allow_support:
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        return
+            if not allow_support:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
-
-        # 2.4. Chặn mention (bỏ URL trước khi kiểm)
+        # 2.4 chặn mention (bỏ URL trước)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
             if "@" in text_no_urls:
@@ -726,7 +701,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.5. Chống flood nhẹ
+        # 2.5 chống flood nhẹ
         key = (chat_id, user.id)
         now_ts = datetime.now(timezone.utc).timestamp()
         bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
