@@ -658,27 +658,30 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
-        # 2.3. Chặn link (trừ whitelist hoặc supporter)  --- ĐÃ SỬA ---
-        if s.antilink and LINK_RE.search(text):
-            wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            msg_hosts = extract_hosts(text)
+        # 2.3. Chặn link (trừ whitelist hoặc supporter)
+if s.antilink and LINK_RE.search(text):
+    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+    msg_hosts = extract_hosts(text)
+    is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
 
-            # Nếu bất kỳ host nào thuộc whitelist -> BỎ QUA LUÔN
-            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-                return
+    # ✅ Nếu là whitelist thì cho qua NGAY và dừng hẳn guard
+    if is_whitelisted:
+        return
 
-            allow_support = False
-            try:
-                if get_support_enabled(db, chat_id):
-                    sup_ids = list_supporters(db, chat_id)
-                    allow_support = user.id in sup_ids
-            except Exception:
-                allow_support = False
+    allow_support = False
+    try:
+        if get_support_enabled(db, chat_id):
+            sup_ids = list_supporters(db, chat_id)
+            allow_support = user.id in sup_ids
+    except Exception:
+        allow_support = False
 
-            if not allow_support:
-                try: await msg.delete()
-                except Exception: pass
-                return
+    if not allow_support:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
         # 2.4. Chặn mention (bỏ URL trước khi kiểm)
         if s.antimention:
