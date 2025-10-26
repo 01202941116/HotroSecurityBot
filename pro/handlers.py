@@ -5,7 +5,7 @@ from core.models import SessionLocal, SupportSetting, Supporter, list_supporters
 
 import secrets
 from datetime import timedelta, timezone as _tz
-
+from telegram.ext import CommandHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.constants import ParseMode
@@ -356,6 +356,43 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text(msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     finally:
         db.close()
+        # ===================== CLEAR PERSONAL CACHE =====================
+# Dữ liệu cache riêng cho từng người (user_id: data)
+USER_CACHE = {}
+
+def clear_personal_cache(update, context):
+    """Lệnh /clear_cache – Xóa cache riêng của người dùng"""
+    user_id = update.effective_user.id
+    user_lang = "vi"  # mặc định tiếng Việt
+
+    # Xác định ngôn ngữ Telegram của người dùng
+    if hasattr(update.effective_user, "language_code"):
+        code = (update.effective_user.language_code or "").lower()
+        if code.startswith("en"):
+            user_lang = "en"
+
+    # Nếu người dùng có cache → xóa riêng của họ
+    if user_id in USER_CACHE:
+        USER_CACHE.pop(user_id, None)
+        if user_lang == "en":
+            msg = "✅ Your cache has been cleared!"
+        else:
+            msg = "✅ Đã xóa dữ liệu tạm (cache) của bạn!"
+    else:
+        if user_lang == "en":
+            msg = "ℹ️ You don't have any saved cache."
+        else:
+            msg = "ℹ️ Bạn hiện không có dữ liệu cache nào."
+
+    try:
+        update.message.reply_text(msg)
+    except Exception:
+        pass
+
+
+def register_clear_cache(dp):
+    """Đăng ký lệnh /clear_cache"""
+    dp.add_handler(CommandHandler("clear_cache", clear_personal_cache))
 
 # ------------------------ Register ------------------------
 def register_handlers(app: Application, owner_id: int | None = None):
