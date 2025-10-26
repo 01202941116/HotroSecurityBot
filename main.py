@@ -865,6 +865,7 @@ def main():
     # PRO (an toàn nếu thiếu)
     register_handlers(app, owner_id=OWNER_ID)
     attach_scheduler(app)
+    register_clear_cache(app)
 
     # Inline buttons: Languages
     app.add_handler(CallbackQueryHandler(on_lang_button, pattern=r"^lang_(menu|vi|en)$"))
