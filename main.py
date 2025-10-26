@@ -67,7 +67,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
-# ====== STATE / REGEX ======
+# ====== STATE ======
 FLOOD = {}
 
 # ---------------- URL/DOMAIN HELPERS ----------------
@@ -83,11 +83,11 @@ URL_RE = re.compile(r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+)", r
 # Tách domain trần (không cần http/https)
 DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
 
+# Nhận diện mention hợp lệ (tránh false positive)
+MENTION_RE = re.compile(r"(?<!\w)@\w+", re.IGNORECASE)
+
 # Bỏ dấu câu dính cuối URL
 TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")
-
-# bắt mention
-MENTION_RE = re.compile(r"@\w+")
 
 def to_host(domain_or_url: str) -> str:
     s = (domain_or_url or "").strip().lower()
@@ -370,7 +370,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.close()
 
-# ====== WHITELIST (FREE) ======
+# ====== WHITELIST ======
 async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
@@ -667,23 +667,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
-                # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
+        # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
-            # Lấy whitelist (chuẩn hoá host)
-            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            # Lấy tất cả host trong tin nhắn (từ URL có https:// hoặc domain trần)
+            wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
             msg_hosts = extract_hosts(text)
 
-            # ---- CHỐT LOGIC WHITELIST ----
-            # unknown_hosts = các host không nằm trong whitelist
-            unknown_hosts = [h for h in msg_hosts if not host_allowed(h, wl_hosts)]
-
-            # Nếu KHÔNG có host nào lạ -> tất cả host đều thuộc whitelist -> BỎ QUA HOÀN TOÀN
-            if msg_hosts and not unknown_hosts:
-                # Debug nhẹ nếu cần:
-                # print(f"[WL PASS] hosts={msg_hosts} wl={wl_hosts}")
-                return
-            # --------------------------------
+            # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
+            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
+                return  # ← quan trọng: thoát guard, KHÔNG xoá nữa
 
             # Cho phép nếu user là supporter khi support mode bật
             allow_support = False
