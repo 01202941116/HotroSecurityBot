@@ -667,15 +667,27 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # 2.3 chặn link (trừ whitelist hoặc supporter)
+                # 2.3 chặn link (trừ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
             wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
             msg_hosts = extract_hosts(text)
 
-            # nếu bất kỳ host trong message thuộc whitelist -> bỏ qua
+            # DEBUG: xem bot đang thấy host nào & whitelist là gì
+            try:
+                if OWNER_ID:
+                    await context.bot.send_message(
+                        OWNER_ID,
+                        f"[DBG] chat {chat_id}\n"
+                        f"hosts_in_msg={msg_hosts}\nwhitelist={wl_hosts}\ntext={text[:180]}"
+                    )
+            except Exception:
+                pass
+
+            # ⛳️ Nếu có host nằm trong whitelist => bỏ qua HOÀN TOÀN
             if any(host_allowed(h, wl_hosts) for h in msg_hosts):
                 return
 
+            # Cho phép nếu user là supporter (khi support mode bật)
             allow_support = False
             try:
                 if get_support_enabled(db, chat_id):
@@ -689,8 +701,16 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.delete()
                 except Exception:
                     pass
+                # DEBUG: báo lý do xoá
+                try:
+                    if OWNER_ID:
+                        await context.bot.send_message(
+                            OWNER_ID,
+                            f"[DBG] deleted (antilink) chat {chat_id}\nhosts_in_msg={msg_hosts}\nwhitelist={wl_hosts}"
+                        )
+                except Exception:
+                    pass
                 return
-
         # 2.4 chặn mention (bỏ URL trước)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
