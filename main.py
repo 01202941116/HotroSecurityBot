@@ -409,7 +409,24 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("\n".join(f"• {w.domain}" for w in items))
     finally:
         db.close()
-
+# ====== LỆNH TEST WHITELIST ======
+async def wl_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    text = " ".join(context.args) if context.args else ""
+    db = SessionLocal()
+    try:
+        wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=update.effective_chat.id).all()]
+        msg_hosts = extract_hosts(text)
+        hits = [h for h in msg_hosts if host_allowed(h, wl_hosts)]
+        await update.effective_message.reply_text(
+            "WL: " + ", ".join(wl_hosts) + "\n"
+            "MSG: " + ", ".join(msg_hosts) + "\n"
+            "MATCH: " + (", ".join(hits) if hits else "(none)")
+        )
+    finally:
+        db.close()
+        
 # ====== WARN INFO / CLEAR / TOP ======
 async def warn_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -826,6 +843,7 @@ def main():
     # FREE whitelist
     app.add_handler(CommandHandler("wl_add", wl_add))
     app.add_handler(CommandHandler("wl_list", wl_list))
+    app.add_handler(CommandHandler("wl_test", wl_test))
 
     # Filters & toggles
     app.add_handler(CommandHandler("filter_add", filter_add))
