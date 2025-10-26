@@ -70,26 +70,29 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 # ====== STATE / REGEX ======
 FLOOD = {}
 
-# ---------------- URL/DOMAIN HELPERS (đã sửa) ----------------
-# Regex phát hiện có link để kích hoạt nhánh 2.3
+# ---------------- URL/DOMAIN HELPERS (fixed) ----------------
+# Phát hiện có link để kích hoạt antilink
 LINK_RE = re.compile(
     r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co|biz|me|app|site|top|store|ru|cn|uk|us)(/[^\s<>()]+)?)",
     re.IGNORECASE
 )
-# Tách URL đầy đủ
-URL_RE = re.compile(r"(https?://[^\s<>()]+)", re.IGNORECASE)
-# Tách domain trần (không http/https)
+
+# Dùng để loại URL ra khỏi text trước khi dò '@'
+URL_RE = re.compile(r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+)", re.IGNORECASE)
+
+# Tách domain trần (không cần http/https)
 DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
-# Bỏ dấu câu ở cuối URL (ví dụ: dấu phẩy dính cuối)
+
+# Bỏ dấu câu dính cuối URL
 TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")
 
 def to_host(domain_or_url: str) -> str:
     s = (domain_or_url or "").strip().lower()
     if not s:
         return ""
-    s = TRAILING_PUNCT_RE.sub("", s)         # bỏ dấu câu cuối
-    s = re.sub(r"^https?://", "", s)         # bỏ protocol
-    s = s.split("/")[0].split("?")[0].split("#")[0].strip()  # bỏ path/query/fragment
+    s = TRAILING_PUNCT_RE.sub("", s)                      # bỏ dấu câu cuối
+    s = re.sub(r"^https?://", "", s)                      # bỏ protocol
+    s = s.split("/")[0].split("?")[0].split("#")[0].strip()  # bỏ path, query, fragment
     if s.startswith("www."):
         s = s[4:]
     return s
@@ -97,10 +100,13 @@ def to_host(domain_or_url: str) -> str:
 def extract_hosts(text: str) -> list[str]:
     text = (text or "").strip()
     hosts = []
-    for url in URL_RE.findall(text):         # http/https
+    # lấy host từ full URL
+    for url in URL_RE.findall(text):
         hosts.append(to_host(url))
-    for dom in DOMAIN_RE.findall(text):      # domain trần
+    # lấy host từ domain trần
+    for dom in DOMAIN_RE.findall(text):
         hosts.append(to_host(dom))
+    # unique
     out, seen = [], set()
     for h in hosts:
         if h and h not in seen:
@@ -111,14 +117,14 @@ def host_allowed(host: str, allow_list: list[str]) -> bool:
     h = to_host(host)
     for d in allow_list:
         dd = to_host(d)
-        if dd and (h == dd or h.endswith("." + dd)):  # đúng domain hoặc subdomain
+        if dd and (h == dd or h.endswith("." + dd)):
             return True
     return False
-# ---------------------------------------------------------------
 
 def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
-
+# ------------------------------------------------------------
+    
 # ====== PRO modules (an toàn nếu thiếu) ======
 try:
     from pro.handlers import register_handlers
@@ -660,14 +666,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # 2.3. Chặn link (trừ whitelist hoặc supporter)
 if s.antilink and LINK_RE.search(text):
-    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+    wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
     msg_hosts = extract_hosts(text)
-    is_whitelisted = any(host_allowed(h, wl_hosts) for h in msg_hosts)
 
-    # ✅ Nếu là whitelist thì cho qua NGAY và dừng hẳn guard
-    if is_whitelisted:
+    # Nếu bất kỳ host nào thuộc whitelist -> BỎ QUA LUÔN (không cho các nhánh sau xoá)
+    if any(host_allowed(h, wl_hosts) for h in msg_hosts):
         return
 
+    # Cho phép nếu user là supporter (khi support mode bật)
     allow_support = False
     try:
         if get_support_enabled(db, chat_id):
