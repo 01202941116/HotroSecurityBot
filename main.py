@@ -71,52 +71,53 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 # ====== STATE ======
 FLOOD = {}
 
-# ---------------- URL/DOMAIN HELPERS (patched) ----------------
+# ---- URL/DOMAIN helpers (thay thế toàn bộ helpers cũ) ----
+import re
+
+# phát hiện có link để kích hoạt antilink (URL / www / t.me / @username / domain.tran)
 LINK_RE = re.compile(
     r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co|biz|me|app|site|top|store|ru|cn|uk|us)(/[^\s<>()]+)?)",
     re.IGNORECASE
 )
+
+# dùng để loại URL ra trước khi dò '@' (chỉ url-like)
 URL_RE = re.compile(r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+)", re.IGNORECASE)
+
+# domain trần (bắt các domain trong text)
+DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
+
+# dấu câu bám cuối URL/domain (loại ra)
 TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")
 
 def to_host(domain_or_url: str) -> str:
     s = (domain_or_url or "").strip().lower()
     if not s:
         return ""
-    s = TRAILING_PUNCT_RE.sub("", s)
-    host = ""
-    if "://" in s:
-        try:
-            host = urlsplit(s).hostname or ""
-        except Exception:
-            host = ""
-    else:
-        host = s.split("/")[0].split("?")[0].split("#")[0].strip()
-    if host.startswith("www."):
-        host = host[4:]
-    return host
+    s = TRAILING_PUNCT_RE.sub("", s)                       # bỏ dấu câu cuối
+    s = re.sub(r"^https?://", "", s)                       # bỏ protocol
+    s = s.split("/")[0].split("?")[0].split("#")[0].strip()# bỏ path, query, fragment
+    if s.startswith("www."):
+        s = s[4:]
+    return s
 
 def extract_hosts(text: str) -> list[str]:
     text = (text or "").strip()
     hosts = []
-    for u in URL_RE.findall(text):
-        h = to_host(u)
-        if h:
-            hosts.append(h)
-    for m in re.findall(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", text, flags=re.IGNORECASE):
-        h = to_host(m)
-        if h:
-            hosts.append(h)
+    # lấy host từ full URL
+    for url in URL_RE.findall(text):
+        hosts.append(to_host(url))
+    # lấy host từ domain trần (nếu có)
+    for dom in DOMAIN_RE.findall(text):
+        hosts.append(to_host(dom))
+    # dedupe
     out, seen = [], set()
     for h in hosts:
-        if h not in seen:
+        if h and h not in seen:
             out.append(h); seen.add(h)
     return out
 
 def host_allowed(host: str, allow_list: list[str]) -> bool:
     h = to_host(host)
-    if not h:
-        return False
     for d in allow_list:
         dd = to_host(d)
         if dd and (h == dd or h.endswith("." + dd)):
@@ -125,6 +126,10 @@ def host_allowed(host: str, allow_list: list[str]) -> bool:
 
 def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
+
+# regex bắt đúng mention @username (không bắt email)
+MENTION_RE = re.compile(r'(?<!\w)@[A-Za-z0-9_]{4,32}\b')
+
 # ------------------------------------------------------------
 
 # ====== PRO modules (an toàn nếu thiếu) ======
@@ -667,23 +672,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-                # 2.3 chặn link (trừ whitelist hoặc supporter)
+               # 2.3. Chặn link (trừ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
-            wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            # whitelist chuẩn hoá
+            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
             msg_hosts = extract_hosts(text)
 
-            # DEBUG: xem bot đang thấy host nào & whitelist là gì
-            try:
-                if OWNER_ID:
-                    await context.bot.send_message(
-                        OWNER_ID,
-                        f"[DBG] chat {chat_id}\n"
-                        f"hosts_in_msg={msg_hosts}\nwhitelist={wl_hosts}\ntext={text[:180]}"
-                    )
-            except Exception:
-                pass
-
-            # ⛳️ Nếu có host nằm trong whitelist => bỏ qua HOÀN TOÀN
+            # Nếu bất kỳ host nào thuộc whitelist -> cho qua luôn
             if any(host_allowed(h, wl_hosts) for h in msg_hosts):
                 return
 
@@ -701,20 +696,12 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.delete()
                 except Exception:
                     pass
-                # DEBUG: báo lý do xoá
-                try:
-                    if OWNER_ID:
-                        await context.bot.send_message(
-                            OWNER_ID,
-                            f"[DBG] deleted (antilink) chat {chat_id}\nhosts_in_msg={msg_hosts}\nwhitelist={wl_hosts}"
-                        )
-                except Exception:
-                    pass
                 return
-        # 2.4 chặn mention (bỏ URL trước)
+
+        # 2.4. Chặn mention (loại URL trước, chỉ bắt @username hợp lệ)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
-            if "@" in text_no_urls:
+            if MENTION_RE.search(text_no_urls):
                 try:
                     await msg.delete()
                 except Exception:
