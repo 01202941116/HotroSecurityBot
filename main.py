@@ -640,10 +640,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_admin = False
 
         if not is_admin and cmd not in ALLOWED_COMMANDS:
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
-        return  # để CommandHandler xử lý
+        # để CommandHandler xử lý tiếp
+        return
 
     # 2) Lọc nội dung thường
     chat_id = chat.id
@@ -654,47 +657,55 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 2.1. Từ khóa filter
         for it in db.query(Filter).filter_by(chat_id=chat_id).all():
             if it.pattern and it.pattern.lower() in low:
-                try: await msg.delete()
-                except Exception: pass
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 return
 
         # 2.2. Chặn tin nhắn forward
         if s.antiforward and getattr(msg, "forward_origin", None):
-            try: await msg.delete()
-            except Exception: pass
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             return
 
         # 2.3. Chặn link (trừ whitelist hoặc supporter)
-if s.antilink and LINK_RE.search(text):
-    wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-    msg_hosts = extract_hosts(text)
+        if s.antilink and LINK_RE.search(text):
+            # Lấy whitelist (đã chuẩn hoá host)
+            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            # Tách toàn bộ host xuất hiện trong tin
+            msg_hosts = extract_hosts(text)
 
-    # Nếu bất kỳ host nào thuộc whitelist -> BỎ QUA LUÔN (không cho các nhánh sau xoá)
-    if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-        return
+            # Nếu BẤT KỲ host thuộc whitelist => BỎ QUA (không xoá)
+            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
+                return
 
-    # Cho phép nếu user là supporter (khi support mode bật)
-    allow_support = False
-    try:
-        if get_support_enabled(db, chat_id):
-            sup_ids = list_supporters(db, chat_id)
-            allow_support = user.id in sup_ids
-    except Exception:
-        allow_support = False
+            # Cho phép nếu user là supporter khi support mode bật
+            allow_support = False
+            try:
+                if get_support_enabled(db, chat_id):
+                    sup_ids = list_supporters(db, chat_id)
+                    allow_support = user.id in sup_ids
+            except Exception:
+                allow_support = False
 
-    if not allow_support:
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        return
+            if not allow_support:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
         # 2.4. Chặn mention (bỏ URL trước khi kiểm)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
             if "@" in text_no_urls:
-                try: await msg.delete()
-                except Exception: pass
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 return
 
         # 2.5. Chống flood nhẹ
