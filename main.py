@@ -667,17 +667,23 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
             return
 
-        # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
+                # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
             # Lấy whitelist (chuẩn hoá host)
             wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
             # Lấy tất cả host trong tin nhắn (từ URL có https:// hoặc domain trần)
             msg_hosts = extract_hosts(text)
 
-            # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
-            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-                print("[WHITELIST OK]", msg_hosts)
-                return  # ← quan trọng: thoát hàm guard, KHÔNG xoá nữa
+            # ---- CHỐT LOGIC WHITELIST ----
+            # unknown_hosts = các host không nằm trong whitelist
+            unknown_hosts = [h for h in msg_hosts if not host_allowed(h, wl_hosts)]
+
+            # Nếu KHÔNG có host nào lạ -> tất cả host đều thuộc whitelist -> BỎ QUA HOÀN TOÀN
+            if msg_hosts and not unknown_hosts:
+                # Debug nhẹ nếu cần:
+                # print(f"[WL PASS] hosts={msg_hosts} wl={wl_hosts}")
+                return
+            # --------------------------------
 
             # Cho phép nếu user là supporter khi support mode bật
             allow_support = False
