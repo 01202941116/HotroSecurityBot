@@ -632,7 +632,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (msg.text or msg.caption or "")
     low = text.lower()
 
-    # 1) chặn lệnh giả
+    # 1) Chặn lệnh giả
     if text.startswith("/"):
         cmd = text.split()[0].lower()
         try:
@@ -647,15 +647,15 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
-        return
+        return  # để CommandHandler xử lý
 
-    # 2) lọc nội dung thường
+    # 2) Lọc nội dung thường
     chat_id = chat.id
     db = SessionLocal()
     try:
         s = get_settings(db, chat_id)
 
-        # 2.1 filter từ khoá
+        # 2.1. Từ khoá filter
         for it in db.query(Filter).filter_by(chat_id=chat_id).all():
             if it.pattern and it.pattern.lower() in low:
                 try:
@@ -664,7 +664,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.2 chặn forward
+        # 2.2. Chặn tin nhắn forward
         if s.antiforward and getattr(msg, "forward_origin", None):
             try:
                 await msg.delete()
@@ -672,22 +672,23 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-               # 2.3. Chặn link (trừ whitelist hoặc supporter)
+        # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
         if s.antilink and LINK_RE.search(text):
-            # whitelist chuẩn hoá
+            # Lấy whitelist (chuẩn hoá host)
             wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+            # Lấy tất cả host trong tin nhắn (từ URL có https:// hoặc domain trần)
             msg_hosts = extract_hosts(text)
 
-            # Nếu bất kỳ host nào thuộc whitelist -> cho qua luôn
+            # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
             if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-                return
+                return  # ← quan trọng: thoát hàm guard, KHÔNG xoá nữa
 
-            # Cho phép nếu user là supporter (khi support mode bật)
+            # Cho phép nếu user là supporter khi support mode bật
             allow_support = False
             try:
                 if get_support_enabled(db, chat_id):
                     sup_ids = list_supporters(db, chat_id)
-                    allow_support = user.id in sup_ids
+                    allow_support = (user.id in sup_ids)
             except Exception:
                 allow_support = False
 
@@ -698,7 +699,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.4. Chặn mention (loại URL trước, chỉ bắt @username hợp lệ)
+        # 2.4. Chặn mention (loại URL trước rồi mới bắt @username)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
             if MENTION_RE.search(text_no_urls):
@@ -708,7 +709,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-        # 2.5 chống flood nhẹ
+        # 2.5. Chống flood nhẹ
         key = (chat_id, user.id)
         now_ts = datetime.now(timezone.utc).timestamp()
         bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
