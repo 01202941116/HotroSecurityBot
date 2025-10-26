@@ -410,7 +410,31 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("\n".join(f"• {w.domain}" for w in items))
     finally:
         db.close()
+async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    m = update.effective_message
+    if not context.args:
+        return await m.reply_text("Cú pháp: /wl_del <domain>")
 
+    raw = context.args[0]
+    domain = to_host(raw)  # <--- CHỖ QUAN TRỌNG: chuẩn hoá host trước khi tìm
+    if not domain:
+        return await m.reply_text("Domain không hợp lệ.")
+
+    db = SessionLocal()
+    try:
+        chat_id = update.effective_chat.id
+        row = db.query(Whitelist).filter_by(chat_id=chat_id, domain=domain).one_or_none()
+        if not row:
+            await m.reply_text(f"❗Không tìm thấy domain trong whitelist.\n"
+                               f"💡Gợi ý: Hãy thử /wl_list để xem danh sách hiện tại.")
+            return
+        db.delete(row)
+        db.commit()
+        await m.reply_text(f"🗑️ Đã xoá khỏi whitelist: {domain}")
+    finally:
+        db.close()
 # ====== WARN INFO / CLEAR / TOP ======
 async def warn_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
