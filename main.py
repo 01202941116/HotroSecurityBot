@@ -690,60 +690,63 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
-        if s.antilink and LINK_RE.search(text):
-            # Lấy whitelist (chuẩn hoá host)
-            wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
-            # Lấy tất cả host trong tin nhắn (từ URL có https:// hoặc domain trần)
-            msg_hosts = extract_hosts(text)
+if s.antilink and LINK_RE.search(text):
+    # Lấy whitelist (chuẩn hoá host)
+    wl_hosts = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
+    # Lấy tất cả host trong tin nhắn (từ URL có https:// hoặc domain trần)
+    msg_hosts = extract_hosts(text)
 
-            # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
-            if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-                return  # ← quan trọng: thoát hàm guard, KHÔNG xoá nữa
+    # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
+    for h in msg_hosts:
+        if host_allowed(h, wl_hosts):
+            print(f"[WHITELIST OK] {h}")  # debug: thấy dòng này nghĩa là link được whitelist
+            return  # ← QUAN TRỌNG: THOÁT HÀM guard, KHÔNG XOÁ NỮA
 
-            # Cho phép nếu user là supporter khi support mode bật
-            allow_support = False
-            try:
-                if get_support_enabled(db, chat_id):
-                    sup_ids = list_supporters(db, chat_id)
-                    allow_support = (user.id in sup_ids)
-            except Exception:
-                allow_support = False
+    # Cho phép nếu user là supporter khi support mode bật
+    allow_support = False
+    try:
+        if get_support_enabled(db, chat_id):
+            sup_ids = list_supporters(db, chat_id)
+            allow_support = (user.id in sup_ids)
+    except Exception:
+        allow_support = False
 
-            if not allow_support:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                return
+    # Nếu không được phép -> xoá
+    if not allow_support:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
-        # 2.4. Chặn mention (loại URL trước rồi mới bắt @username)
-        if s.antimention:
-            text_no_urls = URL_RE.sub("", text)
-            if MENTION_RE.search(text_no_urls):
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                return
+# 2.4. Chặn mention (loại URL trước rồi mới bắt @username)
+if s.antimention:
+    text_no_urls = URL_RE.sub("", text)
+    if "@" in text_no_urls:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
-        # 2.5. Chống flood nhẹ
-        key = (chat_id, user.id)
-        now_ts = datetime.now(timezone.utc).timestamp()
-        bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
-        bucket.append(now_ts)
-        FLOOD[key] = bucket
-        if len(bucket) > s.flood_limit and s.flood_mode == "mute":
-            try:
-                until = datetime.now(timezone.utc) + timedelta(minutes=5)
-                await context.bot.restrict_chat_member(
-                    chat_id, user.id,
-                    ChatPermissions(can_send_messages=False),
-                    until_date=until
-                )
-            except Exception:
-                pass
-    finally:
-        db.close()
+# 2.5. Chống flood nhẹ
+key = (chat_id, user.id)
+now_ts = datetime.now(timezone.utc).timestamp()
+bucket = [t for t in FLOOD.get(key, []) if now_ts - t < 10]
+bucket.append(now_ts)
+FLOOD[key] = bucket
+if len(bucket) > s.flood_limit and s.flood_mode == "mute":
+    try:
+        until = datetime.now(timezone.utc) + timedelta(minutes=5)
+        await context.bot.restrict_chat_member(
+            chat_id, user.id,
+            ChatPermissions(can_send_messages=False),
+            until_date=until
+        )
+    except Exception:
+        pass
+finally:
+    db.close()
 
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
