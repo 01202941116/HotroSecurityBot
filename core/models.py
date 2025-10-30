@@ -72,6 +72,7 @@ class Setting(Base):
     flood_limit = Column(Integer, default=3)
     flood_mode = Column(String, default="mute")
     nobots = Column(Boolean, default=True)
+    welcome_ttl = Column(Integer, default=900)  # giây; 0 = không auto-xoá
 
 class Whitelist(Base):
     __tablename__ = "whitelist"
@@ -168,6 +169,15 @@ def init_db():
                 conn.execute(text("UPDATE settings SET nobots = TRUE WHERE nobots IS NULL"))
     except Exception as e:
         print("[migrate] settings.nobots note:", e)
+    # ensure settings.welcome_ttl
+    try:
+        cols_settings = {c["name"] for c in insp.get_columns("settings")}
+        if "welcome_ttl" not in cols_settings:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN welcome_ttl INTEGER DEFAULT 900"))
+    except Exception as e:
+        print("[migrate] settings.welcome_ttl note:", e)
+    
 
 # ===== HELPERS =====
 def count_users(session=None) -> int:
@@ -184,3 +194,30 @@ def get_support_enabled(db: SessionLocal, chat_id: int) -> bool:
 
 def list_supporters(db: SessionLocal, chat_id: int) -> list[int]:
     return [r.user_id for r in db.query(Supporter).filter_by(chat_id=chat_id).all()]
+def get_welcome_ttl(chat_id: int) -> int:
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(chat_id=chat_id, welcome_ttl=900)
+            db.add(s); db.commit(); db.refresh(s)
+        return int(getattr(s, "welcome_ttl", 900))
+    finally:
+        db.close()
+
+
+def set_welcome_ttl(chat_id: int, seconds: int) -> int:
+    if seconds < 0:
+        seconds = 0
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(chat_id=chat_id)
+            db.add(s); db.commit(); db.refresh(s)
+        s.welcome_ttl = int(seconds)
+        db.commit()
+        return int(seconds)
+    finally:
+        db.close()
+    
