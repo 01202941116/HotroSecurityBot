@@ -399,6 +399,30 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text(msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     finally:
         db.close()
+
+# ===================== CLEAR PERSONAL CACHE =====================
+# Dữ liệu cache riêng cho từng người (user_id: data)
+USER_CACHE: dict[int, dict] = {}
+
+def clear_personal_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /clear_cache – Xóa cache riêng của người dùng"""
+    user_id = update.effective_user.id
+    user_lang = "vi"  # mặc định tiếng Việt
+
+    code = (getattr(update.effective_user, "language_code", "") or "").lower()
+    if code.startswith("en"):
+        user_lang = "en"
+
+    if user_id in USER_CACHE:
+        USER_CACHE.pop(user_id, None)
+        msg = "✅ Your cache has been cleared!" if user_lang == "en" else "✅ Đã xóa dữ liệu tạm (cache) của bạn!"
+    else:
+        msg = "ℹ️ You don't have any saved cache." if user_lang == "en" else "ℹ️ Bạn hiện không có dữ liệu cache nào."
+
+    try:
+        update.message.reply_text(msg)
+    except Exception:
+        pass
         
         # ===================== CLEAR PERSONAL CACHE =====================
 # Dữ liệu cache riêng cho từng người (user_id: data)
