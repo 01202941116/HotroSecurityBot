@@ -178,6 +178,16 @@ def init_db():
                 conn.execute(text("ALTER TABLE settings ADD COLUMN welcome_ttl INTEGER DEFAULT 900"))
     except Exception as e:
         print("[migrate] settings.welcome_ttl note:", e)
+    # ensure settings.antispam
+    try:
+        cols_settings = {c["name"] for c in insp.get_columns("settings")}
+        if "antispam" not in cols_settings:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN antispam BOOLEAN DEFAULT TRUE"))
+                conn.execute(text("UPDATE settings SET antispam = TRUE WHERE antispam IS NULL"))
+    except Exception as e:
+        print("[migrate] settings.antispam note:", e)
+    
     
 
 # ===== HELPERS =====
