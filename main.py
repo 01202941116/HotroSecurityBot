@@ -778,28 +778,35 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # 2.x. Chống spam ảnh & media (khi bật)
         if chat_id in ANTISPAM_CHATS:
-            try:
-                member = await context.bot.get_chat_member(chat_id, user.id)
-                is_admin = member.status in ("administrator", "creator")
-            except Exception:
-                is_admin = False
+    try:
+        member = await context.bot.get_chat_member(chat_id, user.id)
+        is_admin = member.status in ("administrator", "creator")
+    except Exception:
+        is_admin = False
 
-            if not is_admin:
-                has_media = any([
-                    getattr(msg, "photo", None),
-                    getattr(msg, "video", None),
-                    getattr(msg, "animation", None),
-                    getattr(msg, "sticker", None),
-                    getattr(msg, "document", None) and not msg.document.file_name.lower().endswith((".txt",".md",".csv")),
-                    getattr(msg, "voice", None),
-                    getattr(msg, "audio", None),
-                ])
-                if has_media:
-                    try: 
-                        await msg.delete()
-                    except Exception: 
-                        pass
-                    return
+    # Nếu không phải admin
+    if not is_admin:
+        text_lower = (msg.caption or msg.text or "").lower()
+
+        # Nếu có từ khoá "lỗi", "bug", "error", "report" → bỏ qua, KHÔNG xoá
+        if any(kw in text_lower for kw in ["lỗi", "bug", "error", "report"]):
+            return
+
+        has_media = any([
+            getattr(msg, "photo", None),
+            getattr(msg, "video", None),
+            getattr(msg, "animation", None),
+            getattr(msg, "sticker", None),
+            getattr(msg, "document", None) and not msg.document.file_name.lower().endswith((".txt",".md",".csv")),
+            getattr(msg, "voice", None),
+            getattr(msg, "audio", None),
+        ])
+        if has_media:
+            try: 
+                await msg.delete()
+            except Exception: 
+                pass
+            return
 
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
