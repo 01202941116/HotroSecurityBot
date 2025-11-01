@@ -32,6 +32,7 @@ ALLOWED_COMMANDS = {
     "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
     "/setwelcome",
+    "/clear_cache", 
 }
 
 # ====== LOCAL MODELS ======
@@ -140,6 +141,20 @@ try:
 except Exception as e:
     print("pro.scheduler warn:", e)
     attach_scheduler = lambda app: None
+
+try:
+    from pro.handlers import register_handlers, register_clear_cache
+except Exception as e:
+    print("pro.handlers warn:", e)
+    register_handlers = lambda app, **kw: None
+    register_clear_cache = lambda app: None
+
+try:
+    from pro.scheduler import attach_scheduler
+except Exception as e:
+    print("pro.scheduler warn:", e)
+    attach_scheduler = lambda app: None
+    
 
 # ====== UPTIME ======
 START_AT = datetime.now(timezone.utc)
