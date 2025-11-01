@@ -9,7 +9,7 @@ from telegram.ext import CommandHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.constants import ParseMode
-
+from telegram.ext import Application, CommandHandler
 from core.models import (
     SessionLocal,
     User,
@@ -482,6 +482,7 @@ def register_handlers(app: Application, owner_id: int | None = None):
         # Anti-spam
     app.add_handler(CommandHandler("antispam_on", antispam_on))
     app.add_handler(CommandHandler("antispam_off", antispam_off))
+    app.add_handler(CommandHandler("clear_cache", clear_personal_cache))
 
     # Quảng cáo tự động
     app.add_handler(CommandHandler("ad_on", ad_on))
