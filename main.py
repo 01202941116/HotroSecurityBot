@@ -33,6 +33,9 @@ ALLOWED_COMMANDS = {
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
     "/setwelcome",
     "/clear_cache", 
+    "/welcome_ttl",
+    "/antispam_on",
+    "/antispam_off",
 }
 
 # ====== LOCAL MODELS ======
