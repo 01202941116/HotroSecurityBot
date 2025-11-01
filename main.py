@@ -776,19 +776,18 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
         
-        # 2.x. Chống spam ảnh & media (khi bật)
-        if chat_id in ANTISPAM_CHATS:
+        # --- AntiSpam: chặn media với member, trừ ảnh báo lỗi ---
+if chat_id in ANTISPAM_CHATS:
     try:
         member = await context.bot.get_chat_member(chat_id, user.id)
         is_admin = member.status in ("administrator", "creator")
     except Exception:
         is_admin = False
 
-    # Nếu không phải admin
     if not is_admin:
         text_lower = (msg.caption or msg.text or "").lower()
 
-        # Nếu có từ khoá "lỗi", "bug", "error", "report" → bỏ qua, KHÔNG xoá
+        # cho phép ảnh có caption báo lỗi
         if any(kw in text_lower for kw in ["lỗi", "bug", "error", "report"]):
             return
 
@@ -797,14 +796,15 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             getattr(msg, "video", None),
             getattr(msg, "animation", None),
             getattr(msg, "sticker", None),
-            getattr(msg, "document", None) and not msg.document.file_name.lower().endswith((".txt",".md",".csv")),
+            (getattr(msg, "document", None) and
+             not msg.document.file_name.lower().endswith((".txt", ".md", ".csv"))),
             getattr(msg, "voice", None),
             getattr(msg, "audio", None),
         ])
         if has_media:
-            try: 
+            try:
                 await msg.delete()
-            except Exception: 
+            except Exception:
                 pass
             return
 
