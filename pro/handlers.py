@@ -18,6 +18,7 @@ from core.models import (
     Whitelist,
     PromoSetting,
     now_utc,
+    Setting,
 )
 
 # ====== i18n: lưu lựa chọn ngôn ngữ RAM ======
@@ -98,7 +99,23 @@ def _ensure_user(db: SessionLocal, user_id: int, username: str | None) -> User:
         db.add(u)
         db.flush()
     return u
-
+async def _toggle_setting(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          field: str, value: bool, label: str):
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
+    chat_id = update.effective_chat.id
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(chat_id=chat_id)
+            db.add(s); db.flush()
+        setattr(s, field, value)
+        db.commit()
+        await m.reply_text(f"{label}: {'✅ ON' if value else '❎ OFF'}")
+    finally:
+        db.close()
 # ------------------------ PRO core ------------------------
 async def trial_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
@@ -193,6 +210,25 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
         )
     finally:
         db.close()
+   async def _toggle_setting(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          field: str, value: bool, label: str):
+    """Bật/tắt một cờ boolean trong bảng settings cho group hiện tại."""
+    m = update.effective_message
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
+    chat_id = update.effective_chat.id
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(chat_id=chat_id)
+            db.add(s)
+            db.flush()
+        setattr(s, field, value)
+        db.commit()
+        await m.reply_text(f"{label}: {'✅ ON' if value else '❎ OFF'}")
+    finally:
+        db.close()     
 
 # ------------------------ Whitelist (PRO: wl_del, wl_list) ------------------------
 async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -227,6 +263,13 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text(out, disable_web_page_preview=True)
     finally:
         db.close()
+        
+# ------------------------ Anti-spam toggle ------------------------
+async def antispam_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle_setting(update, context, "antispam", True, "Anti-spam")
+
+async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _toggle_setting(update, context, "antispam", False, "Anti-spam")
 
 # ------------------------ Quảng cáo tự động ------------------------
 async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,6 +399,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text(msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     finally:
         db.close()
+        
         # ===================== CLEAR PERSONAL CACHE =====================
 # Dữ liệu cache riêng cho từng người (user_id: data)
 USER_CACHE = {}
@@ -411,6 +455,9 @@ def register_handlers(app: Application, owner_id: int | None = None):
     # IMPORTANT: KHÔNG đăng ký /wl_add ở đây (FREE). PRO chỉ có:
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
+        # Anti-spam
+    app.add_handler(CommandHandler("antispam_on", antispam_on))
+    app.add_handler(CommandHandler("antispam_off", antispam_off))
 
     # Quảng cáo tự động
     app.add_handler(CommandHandler("ad_on", ad_on))
