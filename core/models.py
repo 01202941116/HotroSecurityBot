@@ -73,6 +73,7 @@ class Setting(Base):
     flood_mode = Column(String, default="mute")
     nobots = Column(Boolean, default=True)
     welcome_ttl = Column(Integer, default=900)  # giây; 0 = không auto-xoá
+    antispam = Column(Boolean, default=True)
 
 class Whitelist(Base):
     __tablename__ = "whitelist"
