@@ -682,8 +682,41 @@ async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    if not msg:
-        return
+    chat_id = update.effective_chat.id
+    user = msg.from_user
+    s = get_settings(db, chat_id)
+
+    # --- AntiSpam: chặn media với member, trừ ảnh báo lỗi ---
+    if chat_id in ANTISPAM_CHATS:
+        try:
+            member = await context.bot.get_chat_member(chat_id, user.id)
+            is_admin = member.status in ("administrator", "creator")
+        except Exception:
+            is_admin = False
+
+        if not is_admin:
+            text_lower = (msg.caption or msg.text or "").lower()
+
+            # cho phép ảnh có caption báo lỗi
+            if any(kw in text_lower for kw in ["lỗi", "bug", "error", "report"]):
+                return
+
+            has_media = any([
+                getattr(msg, "photo", None),
+                getattr(msg, "video", None),
+                getattr(msg, "animation", None),
+                getattr(msg, "sticker", None),
+                (getattr(msg, "document", None) and
+                 not msg.document.file_name.lower().endswith((".txt", ".md", ".csv"))),
+                getattr(msg, "voice", None),
+                getattr(msg, "audio", None),
+            ])
+            if has_media:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
     chat = update.effective_chat
     user = update.effective_user
