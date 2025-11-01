@@ -1,7 +1,7 @@
 import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
-import os, re
+import os, re, asyncio
 from datetime import datetime, timezone, timedelta
 
 from telegram import (
@@ -9,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from telegram.constants import ParseMode
+    # Conflict dùng để bỏ qua va chạm instance polling
 from telegram.error import Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -20,7 +21,7 @@ from core.models import set_welcome_message, get_welcome_message
 # ====== CHO PHÉP NHỮNG LỆNH NÀO ======
 ALLOWED_COMMANDS = {
     "/start", "/help", "/lang", "/stats", "/status", "/uptime", "/ping",
-    "/wl_add", "/wl_list",
+    "/wl_add", "/wl_list", "/wl_del",
     "/filter_add", "/filter_list", "/filter_del",
     "/antilink_on", "/antilink_off",
     "/antimention_on", "/antimention_off",
@@ -32,10 +33,9 @@ ALLOWED_COMMANDS = {
     "/support_on", "/support_off", "/support_add", "/support_del", "/support_list",
     "/ad_on", "/ad_off", "/ad_set", "/ad_interval", "/ad_status",
     "/setwelcome",
-    "/clear_cache", 
+    "/clear_cache",
     "/welcome_ttl",
-    "/antispam_on",
-    "/antispam_off",
+    "/antispam_on", "/antispam_off",
 }
 
 # ====== LOCAL MODELS ======
@@ -75,31 +75,22 @@ CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 FLOOD = {}
 
 # ---------------- URL/DOMAIN HELPERS ----------------
-# Phát hiện có link để kích hoạt antilink
 LINK_RE = re.compile(
     r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+|@\w+|[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|co|biz|me|app|site|top|store|ru|cn|uk|us)(/[^\s<>()]+)?)",
     re.IGNORECASE
 )
-
-# Dùng để loại URL ra khỏi text trước khi dò '@'
 URL_RE = re.compile(r"(https?://[^\s<>()]+|www\.[^\s<>()]+|t\.me/[^\s<>()]+)", re.IGNORECASE)
-
-# Tách domain trần (không cần http/https)
 DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9\-\.]+\.[a-z]{2,})\b", re.IGNORECASE)
-
-# Nhận diện mention hợp lệ (tránh false positive)
 MENTION_RE = re.compile(r"(?<!\w)@\w+", re.IGNORECASE)
-
-# Bỏ dấu câu dính cuối URL
 TRAILING_PUNCT_RE = re.compile(r"[),.;!?]+$")
 
 def to_host(domain_or_url: str) -> str:
     s = (domain_or_url or "").strip().lower()
     if not s:
         return ""
-    s = TRAILING_PUNCT_RE.sub("", s)                      # bỏ dấu câu cuối
-    s = re.sub(r"^https?://", "", s)                      # bỏ protocol
-    s = s.split("/")[0].split("?")[0].split("#")[0].strip()  # bỏ path, query, fragment
+    s = TRAILING_PUNCT_RE.sub("", s)
+    s = re.sub(r"^https?://", "", s)
+    s = s.split("/")[0].split("?")[0].split("#")[0].strip()
     if s.startswith("www."):
         s = s[4:]
     return s
@@ -107,13 +98,10 @@ def to_host(domain_or_url: str) -> str:
 def extract_hosts(text: str) -> list[str]:
     text = (text or "").strip()
     hosts = []
-    # lấy host từ full URL
     for url in URL_RE.findall(text):
         hosts.append(to_host(url))
-    # lấy host từ domain trần
     for dom in DOMAIN_RE.findall(text):
         hosts.append(to_host(dom))
-    # unique
     out, seen = [], set()
     for h in hosts:
         if h and h not in seen:
@@ -130,21 +118,8 @@ def host_allowed(host: str, allow_list: list[str]) -> bool:
 
 def remove_links(text: str) -> str:
     return re.sub(LINK_RE, "[link bị xóa]", text or "")
-# ------------------------------------------------------------
-    
+
 # ====== PRO modules (an toàn nếu thiếu) ======
-try:
-    from pro.handlers import register_handlers
-except Exception as e:
-    print("pro.handlers warn:", e)
-    register_handlers = lambda app, **kw: None
-
-try:
-    from pro.scheduler import attach_scheduler
-except Exception as e:
-    print("pro.scheduler warn:", e)
-    attach_scheduler = lambda app: None
-
 try:
     from pro.handlers import register_handlers, register_clear_cache
 except Exception as e:
@@ -157,7 +132,6 @@ try:
 except Exception as e:
     print("pro.scheduler warn:", e)
     attach_scheduler = lambda app: None
-    
 
 # ====== UPTIME ======
 START_AT = datetime.now(timezone.utc)
@@ -175,7 +149,6 @@ def _fmt_td(td: timedelta) -> str:
 
 # ====== Helpers ======
 def get_settings(*args, **kwargs) -> Setting:
-    # Kiểu 1 tham số: chat_id
     if len(args) == 1 and isinstance(args[0], int):
         chat_id = args[0]
         db = SessionLocal()
@@ -191,7 +164,6 @@ def get_settings(*args, **kwargs) -> Setting:
             return s
         finally:
             db.close()
-    # Kiểu 2 tham số: (db, chat_id)
     if len(args) == 2:
         db, chat_id = args
         s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -329,7 +301,6 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
 
-    # Whitelist check (host + subdomain)
     wl_hosts = [w.domain for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
     msg_hosts = extract_hosts(text)
     if any(host_allowed(h, wl_hosts) for h in msg_hosts):
@@ -392,16 +363,13 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
-
     m = update.effective_message
     if not context.args:
         return await m.reply_text("Cú pháp: /wl_add <domain>")
-
     raw = context.args[0]
     domain = to_host(raw)
     if not domain:
         return await m.reply_text("Domain không hợp lệ.")
-
     db = SessionLocal()
     try:
         chat_id = update.effective_chat.id
@@ -410,7 +378,6 @@ async def wl_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await m.reply_text(f"Domain đã có trong whitelist: {domain}")
         db.add(Whitelist(chat_id=chat_id, domain=domain))
         db.commit()
-
         total = db.query(Whitelist).filter_by(chat_id=chat_id).count()
         await m.reply_text(f"✅ Đã thêm whitelist: {domain}\nTổng whitelist của nhóm: {total}")
     finally:
@@ -428,31 +395,30 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("\n".join(f"• {w.domain}" for w in items))
     finally:
         db.close()
+
 async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
     m = update.effective_message
     if not context.args:
         return await m.reply_text("Cú pháp: /wl_del <domain>")
-
     raw = context.args[0]
-    domain = to_host(raw)  # <--- CHỖ QUAN TRỌNG: chuẩn hoá host trước khi tìm
+    domain = to_host(raw)
     if not domain:
         return await m.reply_text("Domain không hợp lệ.")
-
     db = SessionLocal()
     try:
         chat_id = update.effective_chat.id
         row = db.query(Whitelist).filter_by(chat_id=chat_id, domain=domain).one_or_none()
         if not row:
-            await m.reply_text(f"❗Không tìm thấy domain trong whitelist.\n"
-                               f"💡Gợi ý: Hãy thử /wl_list để xem danh sách hiện tại.")
+            await m.reply_text("❗Không tìm thấy domain trong whitelist.\n💡Hãy thử /wl_list để xem danh sách hiện tại.")
             return
         db.delete(row)
         db.commit()
         await m.reply_text(f"🗑️ Đã xoá khỏi whitelist: {domain}")
     finally:
         db.close()
+
 # ====== WARN INFO / CLEAR / TOP ======
 async def warn_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -616,7 +582,7 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context): 
+    if not await _must_admin_in_group(update, context):
         return
     db = SessionLocal()
     try:
@@ -628,7 +594,7 @@ async def nobots_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def nobots_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context): 
+    if not await _must_admin_in_group(update, context):
         return
     db = SessionLocal()
     try:
@@ -663,18 +629,18 @@ async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     print("Kick bot failed:", e)
     finally:
         db.close()
-        
+
 # ===== ANTISPAM (RAM) =====
 ANTISPAM_CHATS: set[int] = set()
 
 async def antispam_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context): 
+    if not await _must_admin_in_group(update, context):
         return
     ANTISPAM_CHATS.add(update.effective_chat.id)
     await update.effective_message.reply_text("✅ Đã bật chống spam ảnh & media.")
 
 async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _must_admin_in_group(update, context): 
+    if not await _must_admin_in_group(update, context):
         return
     ANTISPAM_CHATS.discard(update.effective_chat.id)
     await update.effective_message.reply_text("❎ Đã tắt chống spam ảnh & media.")
@@ -682,25 +648,26 @@ async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    chat_id = update.effective_chat.id
-    user = msg.from_user
-    s = get_settings(db, chat_id)
+    if not msg:
+        return
+
+    chat = update.effective_chat
+    user = update.effective_user
+    text = (msg.text or msg.caption or "")
+    low = text.lower()
 
     # --- AntiSpam: chặn media với member, trừ ảnh báo lỗi ---
-    if chat_id in ANTISPAM_CHATS:
+    if chat and chat.id in ANTISPAM_CHATS:
         try:
-            member = await context.bot.get_chat_member(chat_id, user.id)
+            member = await context.bot.get_chat_member(chat.id, user.id)
             is_admin = member.status in ("administrator", "creator")
         except Exception:
             is_admin = False
 
         if not is_admin:
             text_lower = (msg.caption or msg.text or "").lower()
-
-            # cho phép ảnh có caption báo lỗi
             if any(kw in text_lower for kw in ["lỗi", "bug", "error", "report"]):
                 return
-
             has_media = any([
                 getattr(msg, "photo", None),
                 getattr(msg, "video", None),
@@ -718,11 +685,6 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
-    chat = update.effective_chat
-    user = update.effective_user
-    text = (msg.text or msg.caption or "")
-    low = text.lower()
-
     # 1) Chặn lệnh giả
     if text.startswith("/"):
         cmd = text.split()[0].lower()
@@ -736,7 +698,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await msg.delete()
             except Exception: pass
             return
-        return  # để CommandHandler xử lý
+        return  # để CommandHandler xử lý tiếp
 
     # 2) Lọc nội dung thường
     chat_id = chat.id
@@ -762,11 +724,9 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wl_hosts  = [to_host(w.domain) for w in db.query(Whitelist).filter_by(chat_id=chat_id).all()]
             msg_hosts = extract_hosts(text)
 
-            # ⭐ Nếu BẤT KỲ host nằm trong whitelist -> BỎ QUA HOÀN TOÀN
             if any(host_allowed(h, wl_hosts) for h in msg_hosts):
-                return  # ← quan trọng: thoát guard, KHÔNG xoá nữa
+                return  # nằm trong whitelist
 
-            # Cho phép nếu user là supporter khi support mode bật
             allow_support = False
             try:
                 if get_support_enabled(db, chat_id):
@@ -808,38 +768,6 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
     finally:
         db.close()
-        
-        # --- AntiSpam: chặn media với member, trừ ảnh báo lỗi ---
-if chat_id in ANTISPAM_CHATS:
-    try:
-        member = await context.bot.get_chat_member(chat_id, user.id)
-        is_admin = member.status in ("administrator", "creator")
-    except Exception:
-        is_admin = False
-
-    if not is_admin:
-        text_lower = (msg.caption or msg.text or "").lower()
-
-        # cho phép ảnh có caption báo lỗi
-        if any(kw in text_lower for kw in ["lỗi", "bug", "error", "report"]):
-            return
-
-        has_media = any([
-            getattr(msg, "photo", None),
-            getattr(msg, "video", None),
-            getattr(msg, "animation", None),
-            getattr(msg, "sticker", None),
-            (getattr(msg, "document", None) and
-             not msg.document.file_name.lower().endswith((".txt", ".md", ".csv"))),
-            getattr(msg, "voice", None),
-            getattr(msg, "audio", None),
-        ])
-        if has_media:
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-            return
 
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -900,6 +828,13 @@ async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
 
 # 👋 Gửi lời chào khi có thành viên mới + auto-delete theo TTL
+async def _delete_later(bot, chat_id: int, message_id: int, ttl: int):
+    await asyncio.sleep(ttl)
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
 async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = get_welcome_message(update.effective_chat.id)
     if not welcome_text:
@@ -907,25 +842,21 @@ async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
-        ttl = (s.welcome_ttl if s else 0) or 0
+        ttl = (getattr(s, "welcome_ttl", 0) or 0)
     finally:
         db.close()
 
     for user in update.message.new_chat_members:
         name = user.mention_html() if user else "bạn mới"
-        msg = await update.effective_message.reply_html(
+        sent = await update.effective_message.reply_html(
             welcome_text.replace("{name}", name)
         )
         if ttl > 0:
-            # xoá sau ttl giây
-            try:
-                await context.job_queue.run_once(
-                    lambda _ctx: _ctx.bot.delete_message(msg.chat.id, msg.message_id),
-                    when=ttl
-                )
-            except Exception:
-                pass
- # ✅ Đặt thời gian tự xoá lời chào (0 = không xoá)
+            context.application.create_task(
+                _delete_later(context.bot, sent.chat.id, sent.message_id, ttl)
+            )
+
+# ✅ Đặt thời gian tự xoá lời chào (0 = không xoá)
 async def welcome_ttl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _must_admin_in_group(update, context):
         return
@@ -949,7 +880,7 @@ async def welcome_ttl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Đã đặt thời gian tự xoá lời chào = {ttl} giây."
         )
     finally:
-        db.close()       
+        db.close()
 
 # ====== Main ======
 def main():
@@ -982,6 +913,7 @@ def main():
     # FREE whitelist
     app.add_handler(CommandHandler("wl_add", wl_add))
     app.add_handler(CommandHandler("wl_list", wl_list))
+    app.add_handler(CommandHandler("wl_del", wl_del))
 
     # Filters & toggles
     app.add_handler(CommandHandler("filter_add", filter_add))
@@ -999,7 +931,6 @@ def main():
     app.add_handler(CommandHandler("welcome_ttl", welcome_ttl_cmd))
     app.add_handler(CommandHandler("antispam_on", antispam_on))
     app.add_handler(CommandHandler("antispam_off", antispam_off))
-
 
     # Warn utilities
     app.add_handler(CommandHandler("warn", warn_cmd))
