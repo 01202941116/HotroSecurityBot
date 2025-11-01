@@ -663,6 +663,21 @@ async def on_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     print("Kick bot failed:", e)
     finally:
         db.close()
+        
+# ===== ANTISPAM (RAM) =====
+ANTISPAM_CHATS: set[int] = set()
+
+async def antispam_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    ANTISPAM_CHATS.add(update.effective_chat.id)
+    await update.effective_message.reply_text("✅ Đã bật chống spam ảnh & media.")
+
+async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context): 
+        return
+    ANTISPAM_CHATS.discard(update.effective_chat.id)
+    await update.effective_message.reply_text("❎ Đã tắt chống spam ảnh & media.")
 
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -760,6 +775,31 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
     finally:
         db.close()
+        
+        # 2.x. Chống spam ảnh & media (khi bật)
+        if chat_id in ANTISPAM_CHATS:
+            try:
+                member = await context.bot.get_chat_member(chat_id, user.id)
+                is_admin = member.status in ("administrator", "creator")
+            except Exception:
+                is_admin = False
+
+            if not is_admin:
+                has_media = any([
+                    getattr(msg, "photo", None),
+                    getattr(msg, "video", None),
+                    getattr(msg, "animation", None),
+                    getattr(msg, "sticker", None),
+                    getattr(msg, "document", None) and not msg.document.file_name.lower().endswith((".txt",".md",".csv")),
+                    getattr(msg, "voice", None),
+                    getattr(msg, "audio", None),
+                ])
+                if has_media:
+                    try: 
+                        await msg.delete()
+                    except Exception: 
+                        pass
+                    return
 
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -819,14 +859,57 @@ async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_welcome_message(update.effective_chat.id, content)
     await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
 
-# 👋 Gửi lời chào khi có thành viên mới
+# 👋 Gửi lời chào khi có thành viên mới + auto-delete theo TTL
 async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = get_welcome_message(update.effective_chat.id)
     if not welcome_text:
         return
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        ttl = (s.welcome_ttl if s else 0) or 0
+    finally:
+        db.close()
+
     for user in update.message.new_chat_members:
         name = user.mention_html() if user else "bạn mới"
-        await update.effective_message.reply_html(welcome_text.replace("{name}", name))
+        msg = await update.effective_message.reply_html(
+            welcome_text.replace("{name}", name)
+        )
+        if ttl > 0:
+            # xoá sau ttl giây
+            try:
+                await context.job_queue.run_once(
+                    lambda _ctx: _ctx.bot.delete_message(msg.chat.id, msg.message_id),
+                    when=ttl
+                )
+            except Exception:
+                pass
+ # ✅ Đặt thời gian tự xoá lời chào (0 = không xoá)
+async def welcome_ttl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _must_admin_in_group(update, context):
+        return
+    if not context.args:
+        return await update.effective_message.reply_text(
+            "Cú pháp: /welcome_ttl <giây> (0 = không xoá)"
+        )
+    try:
+        ttl = max(0, int(context.args[0]))
+    except ValueError:
+        return await update.effective_message.reply_text("Giá trị không hợp lệ.")
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
+        if not s:
+            s = Setting(chat_id=update.effective_chat.id)
+            db.add(s)
+        s.welcome_ttl = ttl
+        db.commit()
+        await update.effective_message.reply_text(
+            f"✅ Đã đặt thời gian tự xoá lời chào = {ttl} giây."
+        )
+    finally:
+        db.close()       
 
 # ====== Main ======
 def main():
@@ -873,6 +956,10 @@ def main():
     app.add_handler(CommandHandler("setflood", setflood))
     app.add_handler(CommandHandler("nobots_on", nobots_on))
     app.add_handler(CommandHandler("nobots_off", nobots_off))
+    app.add_handler(CommandHandler("welcome_ttl", welcome_ttl_cmd))
+    app.add_handler(CommandHandler("antispam_on", antispam_on))
+    app.add_handler(CommandHandler("antispam_off", antispam_off))
+
 
     # Warn utilities
     app.add_handler(CommandHandler("warn", warn_cmd))
