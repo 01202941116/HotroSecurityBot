@@ -828,6 +828,8 @@ async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
 
 # 👋 Gửi lời chào khi có thành viên mới + auto-delete theo TTL
+import asyncio  # đặt ở đầu file nếu chưa có
+
 async def _delete_later(bot, chat_id: int, message_id: int, ttl: int):
     await asyncio.sleep(ttl)
     try:
@@ -836,25 +838,39 @@ async def _delete_later(bot, chat_id: int, message_id: int, ttl: int):
         pass
 
 async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = get_welcome_message(update.effective_chat.id)
+    # an toàn với event không có message
+    if not getattr(update, "message", None) or not update.message.new_chat_members:
+        return
+
+    chat_id = update.effective_chat.id
+    welcome_text = get_welcome_message(chat_id)
     if not welcome_text:
         return
+
+    # lấy TTL tự xoá
     db = SessionLocal()
     try:
-        s = db.query(Setting).filter_by(chat_id=update.effective_chat.id).one_or_none()
-        ttl = (getattr(s, "welcome_ttl", 0) or 0)
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        ttl = int(getattr(s, "welcome_ttl", 0) or 0)
     finally:
         db.close()
 
+    # gửi tin CHÀO MỚI (không reply vào “đã tham gia”)
     for user in update.message.new_chat_members:
         name = user.mention_html() if user else "bạn mới"
-        sent = await update.effective_message.reply_html(
-            welcome_text.replace("{name}", name)
-        )
-        if ttl > 0:
-            context.application.create_task(
-                _delete_later(context.bot, sent.chat.id, sent.message_id, ttl)
+        try:
+            sent = await context.bot.send_message(
+                chat_id=chat_id,
+                text=welcome_text.replace("{name}", name),
+                parse_mode=ParseMode.HTML
             )
+            if ttl > 0:
+                context.application.create_task(
+                    _delete_later(context.bot, sent.chat.id, sent.message_id, ttl)
+                )
+        except Exception:
+            # tránh crash nếu bot không có quyền gửi/xoá
+            pass
 
 # ✅ Đặt thời gian tự xoá lời chào (0 = không xoá)
 async def welcome_ttl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
