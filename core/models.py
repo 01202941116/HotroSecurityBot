@@ -1,5 +1,6 @@
 # core/models.py
 from datetime import datetime, timedelta
+from typing import Optional
 import os
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey,
@@ -189,7 +190,7 @@ def init_db():
     
 
 # ===== HELPERS =====
-def count_users(db_sess: SessionLocal | None = None) -> int:
+def count_users(db_sess: Optional[SessionLocal] = None) -> int:
     s = db_sess or SessionLocal()
     try:
         return s.query(User).count()
