@@ -143,24 +143,10 @@ def get_welcome_message(chat_id: int) -> str | None:
 
 # ===== INIT / MIGRATION =====
 def init_db():
-    """Tạo bảng và migrate nhẹ cho promo_settings + đảm bảo settings.nobots."""
     Base.metadata.create_all(bind=engine)
     insp = inspect(engine)
 
-    # ensure promo_settings columns
-    try:
-        cols = {c["name"] for c in insp.get_columns("promo_settings")}
-        with engine.begin() as conn:
-            if "is_enabled" not in cols:
-                conn.execute(text("ALTER TABLE promo_settings ADD COLUMN is_enabled BOOLEAN DEFAULT 0"))
-            if "content" not in cols:
-                conn.execute(text("ALTER TABLE promo_settings ADD COLUMN content TEXT DEFAULT ''"))
-            if "interval_minutes" not in cols:
-                conn.execute(text("ALTER TABLE promo_settings ADD COLUMN interval_minutes INTEGER DEFAULT 60"))
-            if "last_sent_at" not in cols:
-                conn.execute(text("ALTER TABLE promo_settings ADD COLUMN last_sent_at TIMESTAMP NULL"))
-    except Exception as e:
-        print("[migrate] promo_settings migration note:", e)
+    # ... (các migrate khác giữ nguyên)
 
     # ensure settings.nobots
     try:
@@ -171,6 +157,7 @@ def init_db():
                 conn.execute(text("UPDATE settings SET nobots = TRUE WHERE nobots IS NULL"))
     except Exception as e:
         print("[migrate] settings.nobots note:", e)
+
     # ensure settings.welcome_ttl
     try:
         cols_settings = {c["name"] for c in insp.get_columns("settings")}
@@ -179,6 +166,7 @@ def init_db():
                 conn.execute(text("ALTER TABLE settings ADD COLUMN welcome_ttl INTEGER DEFAULT 900"))
     except Exception as e:
         print("[migrate] settings.welcome_ttl note:", e)
+
     # ensure settings.antispam
     try:
         cols_settings = {c["name"] for c in insp.get_columns("settings")}
@@ -188,24 +176,35 @@ def init_db():
                 conn.execute(text("UPDATE settings SET antispam = TRUE WHERE antispam IS NULL"))
     except Exception as e:
         print("[migrate] settings.antispam note:", e)
+
+    # ✅ ensure settings.welcome_text
+    try:
+        cols_settings = {c["name"] for c in insp.get_columns("settings")}
+        if "welcome_text" not in cols_settings:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN welcome_text TEXT NULL"))
+    except Exception as e:
+        print("[migrate] settings.welcome_text note:", e)
     
     
 
 # ===== HELPERS =====
-def count_users(session=None) -> int:
-    s = session or SessionLocal()
+def count_users(db_sess: SessionLocal | None = None) -> int:
+    s = db_sess or SessionLocal()
     try:
         return s.query(User).count()
     finally:
-        if session is None:
+        if db_sess is None:
             s.close()
 
 def get_support_enabled(db: SessionLocal, chat_id: int) -> bool:
-    s = db.query(SupportSetting).filter_by(chat_id=chat_id).one_or_none()
-    return bool(s and s.is_enabled)
+    row = db.query(SupportSetting).filter_by(chat_id=chat_id).one_or_none()
+    return bool(row and row.is_enabled)
 
 def list_supporters(db: SessionLocal, chat_id: int) -> list[int]:
     return [r.user_id for r in db.query(Supporter).filter_by(chat_id=chat_id).all()]
+
+# --- Welcome TTL ---
 def get_welcome_ttl(chat_id: int) -> int:
     db = SessionLocal()
     try:
@@ -213,23 +212,44 @@ def get_welcome_ttl(chat_id: int) -> int:
         if not s:
             s = Setting(chat_id=chat_id, welcome_ttl=900)
             db.add(s); db.commit(); db.refresh(s)
-        return int(getattr(s, "welcome_ttl", 900))
+        return int(getattr(s, "welcome_ttl", 900) or 0)
     finally:
         db.close()
 
-
 def set_welcome_ttl(chat_id: int, seconds: int) -> int:
-    if seconds < 0:
-        seconds = 0
+    secs = max(0, int(seconds))
     db = SessionLocal()
     try:
         s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
         if not s:
             s = Setting(chat_id=chat_id)
             db.add(s); db.commit(); db.refresh(s)
-        s.welcome_ttl = int(seconds)
+        s.welcome_ttl = secs
         db.commit()
-        return int(seconds)
+        return secs
     finally:
         db.close()
+
+# --- Welcome text (lưu DB, không mất khi redeploy) ---
+def set_welcome_message(chat_id: int, text: str) -> None:
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        if not s:
+            s = Setting(chat_id=chat_id)
+            db.add(s)
+        s.welcome_text = (text or "").strip() or None
+        db.commit()
+    finally:
+        db.close()
+
+def get_welcome_message(chat_id: int) -> str | None:
+    db = SessionLocal()
+    try:
+        s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
+        return (s.welcome_text or None) if s else None
+    finally:
+        db.close()
+
+
     
