@@ -3,7 +3,10 @@ sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re, asyncio
 from datetime import datetime, timezone, timedelta
-
+from core.models import Warning, Blacklist, get_or_create_autoban, log_violation
+from telegram import ChatPermissions
+from datetime import datetime, timedelta, timezone
+from telegram.constants import ParseMode
 from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -644,7 +647,42 @@ async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ANTISPAM_CHATS.discard(update.effective_chat.id)
     await update.effective_message.reply_text("❎ Đã tắt chống spam ảnh & media.")
-
+# ===== AUTO BAN / MUTE =====
+async def _autoban_enforce(db, context, chat_id: int, user_id: int):
+    cfg = get_or_create_autoban(db, chat_id)
+    if not cfg.enabled:
+        return
+    w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user_id).one_or_none()
+    count = (w.count if w else 0)
+    # mute khi đạt warn_threshold
+    if count >= cfg.warn_threshold and count < cfg.ban_threshold:
+        try:
+            until = datetime.now(timezone.utc) + timedelta(minutes=cfg.mute_minutes)
+            await context.bot.restrict_chat_member(
+                chat_id, user_id,
+                ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            await context.bot.send_message(
+                chat_id,
+                f"🤐 Đã mute <a href='tg://user?id={user_id}'>user</a> {cfg.mute_minutes} phút (tự động).",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+    # ban khi đạt ban_threshold
+    if count >= cfg.ban_threshold:
+        try:
+            await context.bot.ban_chat_member(chat_id, user_id)
+            db.add(Blacklist(chat_id=chat_id, user_id=user_id))
+            db.commit()
+            await context.bot.send_message(
+                chat_id,
+                f"⛔️ Đã ban <a href='tg://user?id={user_id}'>user</a> (tự động).",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -768,7 +806,14 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
     finally:
         db.close()
-
+log_violation(db, chat_id, user.id, "filter", text)  # ghi log
+w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user.id).one_or_none()
+if not w:
+    w = Warning(chat_id=chat_id, user_id=user.id, count=1); db.add(w)
+else:
+    w.count += 1
+db.commit()
+await _autoban_enforce(db, context, chat_id, user.id)
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
