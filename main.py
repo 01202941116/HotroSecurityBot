@@ -1,24 +1,31 @@
+# ==== main.py ====
+
 import sys
 sys.modules.pop("core.models", None)  # tránh import vòng khi redeploy
 
 import os, re, asyncio
 from datetime import datetime, timezone, timedelta
-from core.models import Warning, Blacklist, get_or_create_autoban, log_violation
-from telegram import ChatPermissions
-from datetime import datetime, timedelta, timezone
-from telegram.constants import ParseMode
+
 from telegram import (
     Update, ChatPermissions,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from telegram.constants import ParseMode
-    # Conflict dùng để bỏ qua va chạm instance polling
 from telegram.error import Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters, CallbackQueryHandler
 )
 
+# models & helpers
+from core.models import (
+    init_db, SessionLocal, Setting, Filter, Whitelist,
+    User, count_users, Warning, Blacklist,
+    Supporter, SupportSetting, list_supporters, get_support_enabled,
+    get_or_create_autoban, log_violation
+)
+from core.lang import t, LANG
+from keep_alive_server import keep_alive
 from core.models import set_welcome_message, get_welcome_message
 
 # ====== CHO PHÉP NHỮNG LỆNH NÀO ======
@@ -41,41 +48,13 @@ ALLOWED_COMMANDS = {
     "/antispam_on", "/antispam_off",
 }
 
-# ====== LOCAL MODELS ======
-from core.models import (
-    init_db, SessionLocal, Setting, Filter, Whitelist,
-    User, count_users, Warning, Blacklist,
-    Supporter, SupportSetting, list_supporters, get_support_enabled
-)
-
-# ====== I18N ======
-from core.lang import t, LANG
-
-# ====== KEEP ALIVE WEB ======
-from keep_alive_server import keep_alive
-
-# === Helper lấy user từ reply hoặc tham số ===
-def _get_target_user(update: Update, args) -> tuple[int | None, str]:
-    msg = update.effective_message
-    if msg.reply_to_message:
-        u = msg.reply_to_message.from_user
-        name = u.full_name or (u.username and f"@{u.username}") or str(u.id)
-        return u.id, name
-    if args:
-        try:
-            uid = int(args[0])
-            return uid, str(uid)
-        except Exception:
-            return None, ""
-    return None, ""
-
 # ====== ENV ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CONTACT_USERNAME = os.getenv("CONTACT_USERNAME", "").strip()
 
 # ====== STATE ======
-FLOOD = {}
+FLOOD: dict[tuple[int,int], list[float]] = {}
 
 # ---------------- URL/DOMAIN HELPERS ----------------
 LINK_RE = re.compile(
@@ -197,7 +176,7 @@ async def _must_admin_in_group(update: Update, context: ContextTypes.DEFAULT_TYP
         return False
 
 # ====== Chọn ngôn ngữ ======
-USER_LANG = {}  # {user_id: "vi"|"en"}
+USER_LANG: dict[int, str] = {}  # {user_id: "vi"|"en"}
 
 async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -219,6 +198,20 @@ async def on_lang_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await q.message.reply_text(LANG["en"]["lang_switched"])
 
 # ====== Commands ======
+def _get_target_user(update: Update, args) -> tuple[int | None, str]:
+    msg = update.effective_message
+    if msg.reply_to_message:
+        u = msg.reply_to_message.from_user
+        name = u.full_name or (u.username and f"@{u.username}") or str(u.id)
+        return u.id, name
+    if args:
+        try:
+            uid = int(args[0])
+            return uid, str(uid)
+        except Exception:
+            return None, ""
+    return None, ""
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     user = update.effective_user
@@ -321,6 +314,7 @@ async def warn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
+    # tăng cảnh cáo
     w = db.query(Warning).filter_by(chat_id=chat_id, user_id=target_user.id).one_or_none()
     if not w:
         w = Warning(chat_id=chat_id, user_id=target_user.id, count=1)
@@ -647,17 +641,35 @@ async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ANTISPAM_CHATS.discard(update.effective_chat.id)
     await update.effective_message.reply_text("❎ Đã tắt chống spam ảnh & media.")
+
 # ===== AUTO BAN / MUTE =====
 async def _autoban_enforce(db, context, chat_id: int, user_id: int):
     cfg = get_or_create_autoban(db, chat_id)
-    if not cfg.enabled:
+    if not cfg or not cfg.enabled:
         return
     w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user_id).one_or_none()
     count = (w.count if w else 0)
-    # mute khi đạt warn_threshold
-    if count >= cfg.warn_threshold and count < cfg.ban_threshold:
+
+    # ban khi đạt ban_threshold
+    if count >= cfg.ban_threshold:
         try:
-            until = datetime.now(timezone.utc) + timedelta(minutes=cfg.mute_minutes)
+            await context.bot.ban_chat_member(chat_id, user_id)
+            if not db.query(Blacklist).filter_by(chat_id=chat_id, user_id=user_id).one_or_none():
+                db.add(Blacklist(chat_id=chat_id, user_id=user_id))
+                db.commit()
+            await context.bot.send_message(
+                chat_id,
+                f"⛔️ Đã ban <a href='tg://user?id={user_id}'>user</a> (tự động).",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+        return
+
+    # mute khi đạt warn_threshold
+    if count >= cfg.warn_threshold:
+        try:
+            until = datetime.now(timezone.utc) + timedelta(minutes=cfg.mute_minutes or 5)
             await context.bot.restrict_chat_member(
                 chat_id, user_id,
                 ChatPermissions(can_send_messages=False),
@@ -670,19 +682,22 @@ async def _autoban_enforce(db, context, chat_id: int, user_id: int):
             )
         except Exception:
             pass
-    # ban khi đạt ban_threshold
-    if count >= cfg.ban_threshold:
-        try:
-            await context.bot.ban_chat_member(chat_id, user_id)
-            db.add(Blacklist(chat_id=chat_id, user_id=user_id))
-            db.commit()
-            await context.bot.send_message(
-                chat_id,
-                f"⛔️ Đã ban <a href='tg://user?id={user_id}'>user</a> (tự động).",
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            pass
+
+async def _record_violation(db, context, chat_id: int, user_id: int, rule: str, raw_text: str):
+    """Ghi log + tăng cảnh cáo + enforce autoban."""
+    try:
+        log_violation(db, chat_id, user_id, rule, (raw_text or "")[:200])
+    except Exception:
+        pass
+    w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user_id).one_or_none()
+    if not w:
+        db.add(Warning(chat_id=chat_id, user_id=user_id, count=1))
+    else:
+        w.count += 1
+        w.last_warned = datetime.now(timezone.utc)
+    db.commit()
+    await _autoban_enforce(db, context, chat_id, user_id)
+
 # ====== Guard (lọc tin nhắn thường) ======
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -747,14 +762,20 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 2.1. Từ khóa filter
         for it in db.query(Filter).filter_by(chat_id=chat_id).all():
             if it.pattern and it.pattern.lower() in low:
-                try: await msg.delete()
-                except Exception: pass
+                try: 
+                    await msg.delete()
+                except Exception: 
+                    pass
+                await _record_violation(db, context, chat_id, user.id, "filter", text)
                 return
 
         # 2.2. Chặn tin nhắn forward
         if s.antiforward and getattr(msg, "forward_origin", None):
-            try: await msg.delete()
-            except Exception: pass
+            try: 
+                await msg.delete()
+            except Exception: 
+                pass
+            await _record_violation(db, context, chat_id, user.id, "forward", text)
             return
 
         # 2.3. Chặn link (TRỪ whitelist hoặc supporter)
@@ -778,14 +799,18 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.delete()
                 except Exception:
                     pass
+                await _record_violation(db, context, chat_id, user.id, "link", text)
                 return
 
         # 2.4. Chặn mention (loại URL trước rồi mới bắt @username)
         if s.antimention:
             text_no_urls = URL_RE.sub("", text)
             if MENTION_RE.search(text_no_urls):
-                try: await msg.delete()
-                except Exception: pass
+                try: 
+                    await msg.delete()
+                except Exception: 
+                    pass
+                await _record_violation(db, context, chat_id, user.id, "mention", text)
                 return
 
         # 2.5. Chống flood nhẹ
@@ -804,16 +829,10 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception:
                 pass
+            # không tính là violation để tránh quá “gắt”
     finally:
         db.close()
-log_violation(db, chat_id, user.id, "filter", text)  # ghi log
-w = db.query(Warning).filter_by(chat_id=chat_id, user_id=user.id).one_or_none()
-if not w:
-    w = Warning(chat_id=chat_id, user_id=user.id, count=1); db.add(w)
-else:
-    w.count += 1
-db.commit()
-await _autoban_enforce(db, context, chat_id, user.id)
+
 # ====== Chặn lệnh không hợp lệ ======
 async def block_unknown_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -873,8 +892,6 @@ async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("✅ Đã lưu câu chào thành công!")
 
 # 👋 Gửi lời chào khi có thành viên mới + auto-delete theo TTL
-import asyncio  # đặt ở đầu file nếu chưa có
-
 async def _delete_later(bot, chat_id: int, message_id: int, ttl: int):
     await asyncio.sleep(ttl)
     try:
@@ -883,7 +900,6 @@ async def _delete_later(bot, chat_id: int, message_id: int, ttl: int):
         pass
 
 async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # an toàn với event không có message
     if not getattr(update, "message", None) or not update.message.new_chat_members:
         return
 
@@ -892,7 +908,6 @@ async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not welcome_text:
         return
 
-    # lấy TTL tự xoá
     db = SessionLocal()
     try:
         s = db.query(Setting).filter_by(chat_id=chat_id).one_or_none()
@@ -900,7 +915,6 @@ async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
-    # gửi tin CHÀO MỚI (không reply vào “đã tham gia”)
     for user in update.message.new_chat_members:
         name = user.mention_html() if user else "bạn mới"
         try:
@@ -914,7 +928,6 @@ async def welcome_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     _delete_later(context.bot, sent.chat.id, sent.message_id, ttl)
                 )
         except Exception:
-            # tránh crash nếu bot không có quyền gửi/xoá
             pass
 
 # ✅ Đặt thời gian tự xoá lời chào (0 = không xoá)
@@ -962,8 +975,7 @@ def main():
 
     # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_menu))
-    app.add_handler(CallbackQueryHandler(help_cb, pattern=r"^help_(free|pro|ads|sys|back|close|trial|redeem)$"))
+    app.add_handler(CommandHandler("help", help_cmd))  # dùng help_cmd thay vì help_menu
     app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
