@@ -1,33 +1,21 @@
-# pro/handlers.py  — bản đã dọn sạch
+# pro/handlers.py
 
 from __future__ import annotations
 
 import secrets
 from datetime import timedelta, timezone as _tz
-from io import StringIO
-from telegram import InputFile
-from core.models import (
-    SessionLocal, Warning, Blacklist,
-    get_or_create_autoban, log_violation, violations_summary, now_utc
-)
-from telegram import Update
+from io import StringIO, BytesIO
+from telegram import InputFile, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from core.lang import t  # i18n
+from core.lang import t
 from core.models import (
     SessionLocal,
-    User,
-    LicenseKey,
-    Trial,
-    Whitelist,
-    PromoSetting,
-    now_utc,
-    Setting,
-    SupportSetting,
-    Supporter,
-    list_supporters,
-    get_support_enabled,
+    User, LicenseKey, Trial, Whitelist, PromoSetting, Setting,
+    SupportSetting, Supporter, list_supporters, get_support_enabled,
+    Warning, Blacklist,  # nếu chưa dùng có thể bỏ
+    get_or_create_autoban, log_violation, violations_summary, now_utc,
 )
 
 # ========= i18n user lang (RAM) =========
@@ -243,6 +231,7 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
     finally:
         db.close()
 
+
 # ---------- AUTOBAN (per-group) ----------
 async def autoban_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _admin_only(update, context):
@@ -256,6 +245,7 @@ async def autoban_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+
 async def autoban_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _admin_only(update, context):
         return await update.effective_message.reply_text("Chỉ admin.")
@@ -268,6 +258,7 @@ async def autoban_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+
 async def autoban_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /autoban_set <warn_threshold> <ban_threshold> <mute_minutes>
@@ -279,7 +270,7 @@ async def autoban_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.effective_message.reply_text("Cú pháp: /autoban_set <cảnh cáo→mute> <cảnh cáo→ban> <phút mute>")
     try:
         w = max(1, int(context.args[0]))
-        b = max(w+1, int(context.args[1]))
+        b = max(w + 1, int(context.args[1]))
         m = max(1, int(context.args[2]))
     except Exception:
         return await update.effective_message.reply_text("Giá trị không hợp lệ.")
@@ -292,15 +283,20 @@ async def autoban_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+
 async def autoban_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         await update.effective_message.reply_text(
-            f"AutoBan: {'✅' if cfg.enabled else '❎'} | warn→mute={cfg.warn_threshold} | warn→ban={cfg.ban_threshold} | mute={cfg.mute_minutes} phút"
+            f"AutoBan: {'✅' if cfg.enabled else '❎'} | "
+            f"warn→mute={cfg.warn_threshold} | warn→ban={cfg.ban_threshold} | "
+            f"mute={cfg.mute_minutes} phút"
         )
     finally:
         db.close()
+
+
 # ---------- LOG VI PHẠM ----------
 async def log_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # chỉ hiển thị tổng ngày hiện tại
@@ -323,6 +319,7 @@ async def log_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("\n".join(lines))
     finally:
         db.close()
+
 
 async def log_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -349,6 +346,7 @@ async def log_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+
 async def log_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /log_export YYYY-MM  → xuất CSV
@@ -364,24 +362,41 @@ async def log_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         s, e = month_range(y, m)
-        rows = (db.query(ViolationLog)
-                  .filter(and_(ViolationLog.chat_id==update.effective_chat.id,
-                               ViolationLog.created_at>=s, ViolationLog.created_at<e))
-                  .order_by(ViolationLog.created_at.asc()).all())
+        rows = (
+            db.query(ViolationLog)
+            .filter(
+                and_(
+                    ViolationLog.chat_id == update.effective_chat.id,
+                    ViolationLog.created_at >= s,
+                    ViolationLog.created_at < e,
+                )
+            )
+            .order_by(ViolationLog.created_at.asc())
+            .all()
+        )
         if not rows:
             return await update.effective_message.reply_text("Không có dữ liệu.")
-        buf = StringIO()
-        buf.write("created_at,user_id,rule,snippet\n")
+
+        # build CSV text
+        text_buf = StringIO()
+        text_buf.write("created_at,user_id,rule,snippet\n")
         for r in rows:
             sn = (r.snippet or "").replace("\n", " ").replace(",", " ")
-            buf.write(f"{r.created_at.isoformat()},{r.user_id},{r.rule},{sn}\n")
-        buf.seek(0)
+            text_buf.write(f"{r.created_at.isoformat()},{r.user_id},{r.rule},{sn}\n")
+
+        # encode to bytes & send via BytesIO
+        csv_bytes = text_buf.getvalue().encode("utf-8")
+        byte_buf = BytesIO(csv_bytes)
+        byte_buf.seek(0)
+
         await update.effective_message.reply_document(
-            document=InputFile(buf, filename=f"violations_{y}-{m:02d}.csv"),
-            caption=f"Log vi phạm {y}-{m:02d}"
+            document=InputFile(byte_buf, filename=f"violations_{y}-{m:02d}.csv"),
+            caption=f"Log vi phạm {y}-{m:02d}",
         )
     finally:
-        db.close()        
+        db.close()
+
+
 # ==================== Whitelist (PRO) ====================
 async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
@@ -718,6 +733,7 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
     app.add_handler(CommandHandler("ad_status", ad_status))
+
     # AUTOBAN
     app.add_handler(CommandHandler("autoban_on", autoban_on))
     app.add_handler(CommandHandler("autoban_off", autoban_off))
