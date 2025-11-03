@@ -46,6 +46,7 @@ ALLOWED_COMMANDS = {
     "/clear_cache",
     "/welcome_ttl",
     "/antispam_on", "/antispam_off",
+    "/log_view",
 }
 
 # ====== ENV ======
