@@ -12,7 +12,6 @@ LANG = {
         "pro_on": "✅ Đã bật quảng cáo tự động cho nhóm này.",
         "pro_off": "⛔️ Đã tắt quảng cáo tự động.",
         "need_pro": "❗ Tính năng này chỉ dành cho người dùng còn PRO/TRIAL.",
-
         "trial_active": "✅ Bạn đang dùng thử, còn {days} ngày.",
         "trial_end": "❗ Thời gian dùng thử đã kết thúc.",
         "trial_started": "✅ Bắt đầu dùng thử 7 ngày. Chúc bạn trải nghiệm vui vẻ!",
@@ -40,7 +39,7 @@ LANG = {
         "ad_status_content": "Nội dung",
         "ad_status_last": "Lần gửi gần nhất",
 
-        # HELP
+        # ===== HELP (full text) =====
         "help_full": (
             "🤖 <b>HotroSecurityBot – Hỗ trợ quản lý nhóm Telegram</b>\n"
             "Tự động lọc spam, chặn link, cảnh báo vi phạm và quản lý quảng cáo thông minh.\n\n"
@@ -58,7 +57,7 @@ LANG = {
             "   ⤷ Ví dụ: <code>/setwelcome Chào mừng {name} đến với nhóm ❤️</code>\n\n"
             "• /welcome_ttl &lt;giây&gt; – Đặt thời gian tự xoá tin chào (0 = không xoá)\n"
             "• /clear_cache – Xóa bộ nhớ tạm (cache) toàn hệ thống bot\n"
-             "• /antispam_on | /antispam_off – Bật/tắt chống spam ảnh & tin nhắn lặp\n"
+            "• /antispam_on | /antispam_off – Bật/tắt chống spam ảnh & tin nhắn lặp\n"
             "💎 <b>GÓI PRO</b>\n"
             "• /pro – Hướng dẫn dùng thử & kích hoạt PRO\n"
             "• /trial – Dùng thử miễn phí 7 ngày\n"
@@ -86,9 +85,26 @@ LANG = {
             "• /lang en — English\n"
         ),
 
+        # ===== HELP (buttons & hints cho menu /help) =====
+        "help_menu_title": "🤖 <b>HotroSecurityBot</b>\nChọn danh mục cần xem:",
+        "help_btn_free": "🆓 Gói FREE",
+        "help_btn_pro": "💎 Gói PRO",
+        "help_btn_ads": "📢 Quảng cáo",
+        "help_btn_sys": "⚙️ Hệ thống",
+        "help_btn_back": "⬅️ Quay lại",
+        "help_btn_close": "❌ Đóng",
+        "help_btn_trial": "🧪 Dùng thử 7 ngày",
+        "help_btn_redeem": "🔑 Nhập key PRO",
+        "help_redeem_hint": "💡 Trả lời tin nhắn này với: <code>/redeem &lt;key&gt;</code>",
+
+        # ===== AutoBan & Logs (thêm câu ngắn) =====
+        "autoban_on_ok": "✅ Đã bật AutoBan (cấm khi đủ 3 cảnh cáo).",
+        "autoban_off_ok": "❎ Đã tắt AutoBan.",
+        "log_title": "📜 <b>Nhật ký vi phạm gần đây</b>",
+        "log_empty": "Không có bản ghi nào.",
+        "welcome_default": "Chào mừng {name} đến với nhóm!",
         "setwelcome_usage": "📌 Dùng: /setwelcome <câu chào>. Dùng {name} để thay tên thành viên.",
-        "setwelcome_ok": "✅ Đã lưu câu chào thành công!",
-        "welcome_default": "Chào mừng {name} đến với nhóm!"
+        "setwelcome_ok": "✅ Đã lưu câu chào thành công!"
     },
 
     "en": {
@@ -99,7 +115,6 @@ LANG = {
         "pro_on": "✅ Auto-promotion enabled for this group.",
         "pro_off": "⛔️ Auto-promotion disabled.",
         "need_pro": "❗ This feature is available for PRO/TRIAL users only.",
-
         "trial_active": "✅ You are on trial, {days} days remaining.",
         "trial_end": "❗ Your trial period has expired.",
         "trial_started": "✅ Trial started for 7 days. Enjoy!",
@@ -169,9 +184,26 @@ LANG = {
             "• /lang en — English\n"
         ),
 
+        # Buttons & hints
+        "help_menu_title": "🤖 <b>HotroSecurityBot</b>\nSelect a category:",
+        "help_btn_free": "🆓 Free Plan",
+        "help_btn_pro": "💎 Pro Plan",
+        "help_btn_ads": "📢 Promotion",
+        "help_btn_sys": "⚙️ System",
+        "help_btn_back": "⬅️ Back",
+        "help_btn_close": "❌ Close",
+        "help_btn_trial": "🧪 7-day Trial",
+        "help_btn_redeem": "🔑 Redeem PRO Key",
+        "help_redeem_hint": "💡 Reply to this message with: <code>/redeem &lt;key&gt;</code>",
+
+        # AutoBan & Logs
+        "autoban_on_ok": "✅ AutoBan enabled (ban at 3 warnings).",
+        "autoban_off_ok": "❎ AutoBan disabled.",
+        "log_title": "📜 <b>Recent violation logs</b>",
+        "log_empty": "No log entries.",
+        "welcome_default": "Welcome {name} to the group!",
         "setwelcome_usage": "📌 Usage: /setwelcome <message>. Use {name} to insert the new member’s name.",
-        "setwelcome_ok": "✅ Welcome message saved!",
-        "welcome_default": "Welcome {name} to the group!"
+        "setwelcome_ok": "✅ Welcome message saved!"
     }
 }
 
