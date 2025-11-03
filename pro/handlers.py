@@ -234,14 +234,20 @@ async def genkey_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_i
 
 # ---------- AUTOBAN (per-group) ----------
 async def autoban_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _admin_only(update, context):
-        return await update.effective_message.reply_text("Chỉ admin.")
+    m = update.effective_message
     db = SessionLocal()
     try:
+        # kiểm tra quyền admin
+        if not await _admin_only(update, context):
+            return await m.reply_text("Chỉ admin.")
+        # kiểm tra gói PRO
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+        
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         cfg.enabled = True
         db.commit()
-        await update.effective_message.reply_text("AutoBan: ✅ ON")
+        await m.reply_text("AutoBan: ✅ ON")
     finally:
         db.close()
 
@@ -260,22 +266,19 @@ async def autoban_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def autoban_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /autoban_set <warn_threshold> <ban_threshold> <mute_minutes>
-    ví dụ: /autoban_set 3 5 1440
-    """
     if not await _admin_only(update, context):
         return await update.effective_message.reply_text("Chỉ admin.")
-    if len(context.args) < 3:
-        return await update.effective_message.reply_text("Cú pháp: /autoban_set <cảnh cáo→mute> <cảnh cáo→ban> <phút mute>")
+    db = SessionLocal()
     try:
+        # kiểm tra gói PRO
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.effective_message.reply_text(t(_lang(update), "need_pro"))
+        
+        if len(context.args) < 3:
+            return await update.effective_message.reply_text("Cú pháp: /autoban_set <warn→mute> <warn→ban> <phút mute>")
         w = max(1, int(context.args[0]))
         b = max(w + 1, int(context.args[1]))
         m = max(1, int(context.args[2]))
-    except Exception:
-        return await update.effective_message.reply_text("Giá trị không hợp lệ.")
-    db = SessionLocal()
-    try:
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         cfg.warn_threshold, cfg.ban_threshold, cfg.mute_minutes = w, b, m
         db.commit()
