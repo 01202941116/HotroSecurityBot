@@ -1,4 +1,4 @@
-# pro/handlers.py
+# pro/handlers.py — bản đã dọn sạch & PRO-hoá đầy đủ
 
 from __future__ import annotations
 
@@ -237,13 +237,13 @@ async def autoban_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     db = SessionLocal()
     try:
-        # kiểm tra quyền admin
+        # quyền admin
         if not await _admin_only(update, context):
             return await m.reply_text("Chỉ admin.")
-        # kiểm tra gói PRO
+        # gói PRO
         if not _has_active_pro(db, update.effective_user.id):
             return await m.reply_text(t(_lang(update), "need_pro"))
-        
+
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         cfg.enabled = True
         db.commit()
@@ -253,14 +253,18 @@ async def autoban_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def autoban_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _admin_only(update, context):
-        return await update.effective_message.reply_text("Chỉ admin.")
+    m = update.effective_message
     db = SessionLocal()
     try:
+        if not await _admin_only(update, context):
+            return await m.reply_text("Chỉ admin.")
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         cfg.enabled = False
         db.commit()
-        await update.effective_message.reply_text("AutoBan: ❎ OFF")
+        await m.reply_text("AutoBan: ❎ OFF")
     finally:
         db.close()
 
@@ -270,28 +274,36 @@ async def autoban_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.effective_message.reply_text("Chỉ admin.")
     db = SessionLocal()
     try:
-        # kiểm tra gói PRO
+        # gói PRO
         if not _has_active_pro(db, update.effective_user.id):
             return await update.effective_message.reply_text(t(_lang(update), "need_pro"))
-        
+
         if len(context.args) < 3:
-            return await update.effective_message.reply_text("Cú pháp: /autoban_set <warn→mute> <warn→ban> <phút mute>")
+            return await update.effective_message.reply_text(
+                "Cú pháp: /autoban_set <cảnh cáo→mute> <cảnh cáo→ban> <phút mute>"
+            )
         w = max(1, int(context.args[0]))
         b = max(w + 1, int(context.args[1]))
         m = max(1, int(context.args[2]))
         cfg = get_or_create_autoban(db, update.effective_chat.id)
         cfg.warn_threshold, cfg.ban_threshold, cfg.mute_minutes = w, b, m
         db.commit()
-        await update.effective_message.reply_text(f"Đã đặt: warn→mute={w}, warn→ban={b}, mute={m} phút.")
+        await update.effective_message.reply_text(
+            f"Đã đặt: warn→mute={w}, warn→ban={b}, mute={m} phút."
+        )
     finally:
         db.close()
 
 
 async def autoban_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         cfg = get_or_create_autoban(db, update.effective_chat.id)
-        await update.effective_message.reply_text(
+        await m.reply_text(
             f"AutoBan: {'✅' if cfg.enabled else '❎'} | "
             f"warn→mute={cfg.warn_threshold} | warn→ban={cfg.ban_threshold} | "
             f"mute={cfg.mute_minutes} phút"
@@ -302,11 +314,14 @@ async def autoban_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- LOG VI PHẠM ----------
 async def log_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # chỉ admin + PRO
     if not await _admin_only(update, context):
         return await update.effective_message.reply_text("Chỉ admin.")
-    # chỉ hiển thị tổng ngày hiện tại
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.effective_message.reply_text(t(_lang(update), "need_pro"))
+
         now = now_utc()
         y, m = now.year, now.month
         by_rule, top_users = violations_summary(db, update.effective_chat.id, y, m)
@@ -337,6 +352,9 @@ async def log_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     y, m = map(int, context.args[0].split("-"))
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.effective_message.reply_text(t(_lang(update), "need_pro"))
+
         by_rule, top_users = violations_summary(db, update.effective_chat.id, y, m)
         lines = [f"📅 Tháng {y}-{m:02d}:"]
         if by_rule:
@@ -366,6 +384,9 @@ async def log_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from core.models import ViolationLog, month_range
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await update.effective_message.reply_text(t(_lang(update), "need_pro"))
+
         s, e = month_range(y, m)
         rows = (
             db.query(ViolationLog)
@@ -408,12 +429,15 @@ async def wl_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = _lang(update)
     if not await _admin_only(update, context):
         return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
-    if not context.args:
-        return await m.reply_text("Cú pháp / Usage: /wl_del domain.com", parse_mode=ParseMode.HTML)
-    domain = (context.args[0] or "").lower().strip().strip("/")
-
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(lang, "need_pro"))
+
+        if not context.args:
+            return await m.reply_text("Cú pháp / Usage: /wl_del domain.com", parse_mode=ParseMode.HTML)
+        domain = (context.args[0] or "").lower().strip().strip("/")
+
         it = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id, domain=domain).one_or_none()
         if not it:
             return await m.reply_text(t(lang, "wl_not_found"))
@@ -429,6 +453,9 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = _lang(update)
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(lang, "need_pro"))
+
         items = db.query(Whitelist).filter_by(chat_id=update.effective_chat.id).all()
         if not items:
             return await m.reply_text(t(lang, "wl_empty"))
@@ -438,7 +465,7 @@ async def wl_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-# ==================== Anti-spam toggle (gắn cờ trong Setting) ====================
+# ==================== Anti-spam toggle (FREE; gắn cờ trong Setting) ====================
 async def antispam_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _toggle_setting(update, context, "antispam", True, "Anti-spam")
 
@@ -447,7 +474,7 @@ async def antispam_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _toggle_setting(update, context, "antispam", False, "Anti-spam")
 
 
-# ==================== Quảng cáo tự động ====================
+# ==================== Quảng cáo tự động (PRO) ====================
 async def ad_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     lang = _lang(update)
@@ -477,6 +504,9 @@ async def ad_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(lang, "need_pro"))
+
         s = db.query(PromoSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
             s = PromoSetting(chat_id=update.effective_chat.id, is_enabled=False)
@@ -557,8 +587,13 @@ def _fmt_ts(dt):
 async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     lang = _lang(update)
+    if not await _admin_only(update, context):
+        return await m.reply_text("Chỉ admin mới dùng lệnh này. / Admin only.")
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(lang, "need_pro"))
+
         chat_id = update.effective_chat.id
         s = db.query(PromoSetting).filter_by(chat_id=chat_id).one_or_none()
         if not s:
@@ -576,7 +611,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-# ==================== CLEAR PERSONAL CACHE ====================
+# ==================== CLEAR PERSONAL CACHE (FREE) ====================
 USER_CACHE: dict[int, dict] = {}
 
 
@@ -605,13 +640,16 @@ def register_clear_cache(app: Application):
     app.add_handler(CommandHandler("clear_cache", clear_personal_cache))
 
 
-# ==================== SUPPORT MODE (per-group) ====================
+# ==================== SUPPORT MODE (per-group, PRO) ====================
 async def support_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     if not await _admin_only(update, context):
         return await m.reply_text("Chỉ admin mới dùng lệnh này.")
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         s = db.query(SupportSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
             s = SupportSetting(chat_id=update.effective_chat.id, is_enabled=True)
@@ -630,6 +668,9 @@ async def support_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await m.reply_text("Chỉ admin mới dùng lệnh này.")
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         s = db.query(SupportSetting).filter_by(chat_id=update.effective_chat.id).one_or_none()
         if not s:
             s = SupportSetting(chat_id=update.effective_chat.id, is_enabled=False)
@@ -659,6 +700,9 @@ async def support_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         if not get_support_enabled(db, update.effective_chat.id):
             return await m.reply_text("Hãy bật trước bằng /support_on")
         ex = db.query(Supporter).filter_by(chat_id=update.effective_chat.id, user_id=target_id).one_or_none()
@@ -685,6 +729,9 @@ async def support_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         it = db.query(Supporter).filter_by(chat_id=update.effective_chat.id, user_id=target_id).one_or_none()
         if not it:
             return await m.reply_text("Không tìm thấy trong danh sách hỗ trợ.")
@@ -699,6 +746,9 @@ async def support_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.effective_message
     db = SessionLocal()
     try:
+        if not _has_active_pro(db, update.effective_user.id):
+            return await m.reply_text(t(_lang(update), "need_pro"))
+
         uids = list_supporters(db, update.effective_chat.id)
         if not get_support_enabled(db, update.effective_chat.id):
             return await m.reply_text("Support mode: ❎\nDanh sách trống.")
@@ -717,39 +767,39 @@ def register_handlers(app: Application, owner_id: int | None = None):
     app.add_handler(CommandHandler("redeem", redeem_cmd))
     app.add_handler(CommandHandler("genkey", lambda u, c: genkey_cmd(u, c, owner_id or 0)))
 
-    # Support Mode
+    # Support Mode (PRO)
     app.add_handler(CommandHandler("support_on", support_on))
     app.add_handler(CommandHandler("support_off", support_off))
     app.add_handler(CommandHandler("support_add", support_add))
     app.add_handler(CommandHandler("support_del", support_del))
     app.add_handler(CommandHandler("support_list", support_list))
 
-    # Whitelist (PRO)
+    # Whitelist (PRO xem/xoá; /wl_add FREE nằm ở main)
     app.add_handler(CommandHandler("wl_del", wl_del))
     app.add_handler(CommandHandler("wl_list", wl_list))
 
-    # Anti-spam flag
+    # Anti-spam flag (FREE)
     app.add_handler(CommandHandler("antispam_on", antispam_on))
     app.add_handler(CommandHandler("antispam_off", antispam_off))
 
-    # Ads
+    # Ads (PRO)
     app.add_handler(CommandHandler("ad_on", ad_on))
     app.add_handler(CommandHandler("ad_off", ad_off))
     app.add_handler(CommandHandler("ad_set", ad_set))
     app.add_handler(CommandHandler("ad_interval", ad_interval))
     app.add_handler(CommandHandler("ad_status", ad_status))
 
-    # AUTOBAN
+    # AUTOBAN (PRO)
     app.add_handler(CommandHandler("autoban_on", autoban_on))
     app.add_handler(CommandHandler("autoban_off", autoban_off))
     app.add_handler(CommandHandler("autoban_set", autoban_set))
     app.add_handler(CommandHandler("autoban_status", autoban_status))
 
-    # LOGS
-    app.add_handler(CommandHandler("log_status", log_status))
-    app.add_handler(CommandHandler("log_view", log_status))
-    app.add_handler(CommandHandler("log_month", log_month))
-    app.add_handler(CommandHandler("log_export", log_export))
+    # LOGS (PRO)
+    app.add_handler(CommandHandler("log_status", log_status))   # tháng hiện tại (tổng hợp)
+    app.add_handler(CommandHandler("log_view", log_status))     # alias cho tiện
+    app.add_handler(CommandHandler("log_month", log_month))     # YYYY-MM
+    app.add_handler(CommandHandler("log_export", log_export))   # CSV
 
-    # /clear_cache
+    # /clear_cache (FREE)
     register_clear_cache(app)
