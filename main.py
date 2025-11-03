@@ -962,7 +962,8 @@ def main():
 
     # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("help", help_menu))
+    app.add_handler(CallbackQueryHandler(help_cb, pattern=r"^help_(free|pro|ads|sys|back|close|trial|redeem)$"))
     app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
