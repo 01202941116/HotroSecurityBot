@@ -299,6 +299,8 @@ async def autoban_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- LOG VI PHẠM ----------
 async def log_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_only(update, context):
+        return await update.effective_message.reply_text("Chỉ admin.")
     # chỉ hiển thị tổng ngày hiện tại
     db = SessionLocal()
     try:
@@ -742,6 +744,7 @@ def register_handlers(app: Application, owner_id: int | None = None):
 
     # LOGS
     app.add_handler(CommandHandler("log_status", log_status))
+    app.add_handler(CommandHandler("log_view", log_status))
     app.add_handler(CommandHandler("log_month", log_month))
     app.add_handler(CommandHandler("log_export", log_export))
 
