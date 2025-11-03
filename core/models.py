@@ -116,6 +116,24 @@ class Blacklist(Base):
     chat_id = Column(BigInteger, index=True)
     user_id = Column(BigInteger, index=True)
     created_at = Column(DateTime, default=func.now())
+# ==== AutoBan & Violation Log ====
+class AutoBanConfig(Base):
+    __tablename__ = "autoban_configs"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, unique=True, index=True, nullable=False)
+    enabled = Column(Boolean, default=False)
+    warn_threshold = Column(Integer, default=3)      # đạt N cảnh cáo → mute
+    ban_threshold  = Column(Integer, default=5)      # đạt N cảnh cáo → ban
+    mute_minutes   = Column(Integer, default=1440)   # mặc định 24h
+
+class ViolationLog(Base):
+    __tablename__ = "violation_logs"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, index=True, nullable=False)
+    user_id = Column(BigInteger, index=True, nullable=False)
+    rule     = Column(String(32), index=True)        # 'link'|'mention'|'forward'|'filter'
+    snippet  = Column(Text, default="")
+    created_at = Column(DateTime, default=now_utc)    
 
 # --- Support mode (per-group) ---
 class SupportSetting(Base):
@@ -230,6 +248,44 @@ def set_welcome_ttl(chat_id: int, seconds: int) -> int:
         return secs
     finally:
         db.close()
+# ===== AutoBan helpers =====
+def get_or_create_autoban(db: SessionLocal, chat_id: int) -> AutoBanConfig:
+    row = db.query(AutoBanConfig).filter_by(chat_id=chat_id).one_or_none()
+    if not row:
+        row = AutoBanConfig(chat_id=chat_id)
+        db.add(row); db.commit(); db.refresh(row)
+    return row
+
+def log_violation(db: SessionLocal, chat_id: int, user_id: int, rule: str, snippet: str = ""):
+    snippet = (snippet or "").strip()
+    if len(snippet) > 512:
+        snippet = snippet[:509] + "..."
+    db.add(ViolationLog(chat_id=chat_id, user_id=user_id, rule=rule, snippet=snippet))
+    db.commit()
+
+def month_range(year: int, month: int):
+    from datetime import date
+    from calendar import monthrange
+    start = datetime(year, month, 1)
+    end   = datetime(year + (month==12), (month % 12) + 1, 1)
+    return start, end
+
+def violations_summary(db: SessionLocal, chat_id: int, year: int, month: int):
+    s, e = month_range(year, month)
+    # tổng theo rule
+    by_rule = (
+        db.query(ViolationLog.rule, func.count(ViolationLog.id))
+          .filter(ViolationLog.chat_id==chat_id, ViolationLog.created_at>=s, ViolationLog.created_at<e)
+          .group_by(ViolationLog.rule).all()
+    )
+    # top user
+    top_users = (
+        db.query(ViolationLog.user_id, func.count(ViolationLog.id))
+          .filter(ViolationLog.chat_id==chat_id, ViolationLog.created_at>=s, ViolationLog.created_at<e)
+          .group_by(ViolationLog.user_id)
+          .order_by(func.count(ViolationLog.id).desc()).limit(10).all()
+    )
+    return by_rule, top_users        
 
 # --- Welcome text (lưu DB, không mất khi redeploy) ---
 def set_welcome_message(chat_id: int, text: str) -> None:
@@ -251,6 +307,4 @@ def get_welcome_message(chat_id: int) -> str | None:
         return (s.welcome_text or None) if s else None
     finally:
         db.close()
-
-
-    
+        
