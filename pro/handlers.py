@@ -615,7 +615,7 @@ async def ad_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 USER_CACHE: dict[int, dict] = {}
 
 
-def clear_personal_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def clear_personal_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /clear_cache – Xóa cache riêng của người dùng"""
     user_id = update.effective_user.id
     user_lang = "vi"
@@ -630,7 +630,7 @@ def clear_personal_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "ℹ️ You don't have any saved cache." if user_lang == "en" else "ℹ️ Bạn hiện không có dữ liệu cache nào."
 
     try:
-        update.message.reply_text(msg)
+        await update.message.reply_text(msg)
     except Exception:
         pass
 
